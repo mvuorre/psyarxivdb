@@ -12,8 +12,14 @@ ENV/
 env.bak/
 venv.bak/
 
-# Data directory
-data/
+# Ignore data directory
+/data/*
+# Explicitly allow snapshots directory
+!/data/snapshots/
+# Ignore contents of snapshots
+/data/snapshots/*
+# But keep index.html
+!/data/snapshots/index.html
 
 # Logs
 *.log
@@ -30,4 +36,5 @@ data/
 Thumbs.db 
 
 # Temporary files
+digest.txt
 docs/

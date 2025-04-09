@@ -1,0 +1,13 @@
+[project]
+name = "OSFdata"
+version = "0.1.0"
+description = "A tool to harvest preprint data from the Open Science Framework (OSF) and serve it with Datasette."
+authors = [
+    {name = "Matti Vuorre", email = "mjvuorre@uvt.nl"}
+]
+readme = "README.md"
+requires-python = ">=3.8"
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta" 
