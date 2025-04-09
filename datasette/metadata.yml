@@ -1,7 +1,7 @@
-title: OSFdata
+title: OSFDatasette
 description_html: |-
   <div>
-  <strong>OSFdata</strong> is a <a href="https://datasette.io/">Datasette</a> database instance serving (de)normalized tables of preprint metadata from the <a href="https://osf.io/preprints/">Open Science Framework</a> <a href="https://api.osf.io/v2/preprints/">API</a>. Its purpose is to make these (de)normalized data highly available for analyses, webapps, and other uses that require fast access and regular updates. The database is updated daily.
+  <strong>OSFDatasette</strong> is a <a href="https://datasette.io/">Datasette</a> database instance serving (de)normalized tables of preprint metadata from the <a href="https://osf.io/preprints/">Open Science Framework</a> <a href="https://api.osf.io/v2/preprints/">API</a>. Its purpose is to make these (de)normalized data highly available for analyses, webapps, and other uses that require fast access and regular updates. The database is updated daily.
   </div>
   <div>
   <h3>Example uses</h3>
@@ -23,7 +23,7 @@ description_html: |-
   <div>
   <h3>Sources and licenses</h3>
   <p>
-  The code used to create this database is available under the MIT license at <a href="https://github.com/mvuorre/osfdata">https://github.com/mvuorre/osfdata</a>. All preprints retain their original licenses as indicated in the data; OSF API is used with gratitude and respect.
+  The code used to create this database is available under the MIT license at <a href="https://github.com/mvuorre/osfdatasette">https://github.com/mvuorre/osfdatasette</a>. All preprints retain their original licenses as indicated in the data; OSF API is used with gratitude and respect.
   </p>
   </div>
 license: ODbL (database) & original licenses (content)
@@ -39,7 +39,7 @@ databases:
       Browse the database tables below or construct custom SQL queries. See <a href="https://datasette.io/docs/">Datasette's documentation</a> for help. Variables in data closely follow the <a href="https://developer.osf.io/#tag/Preprints">Open Science Framework API documentation</a>.
       </p>
       <p>
-      You are probably most interested in the (perhaps poorly named; <a href="https://github.com/mvuorre/osfdata/issues/1">help me!</a>) <strong><a href="https://osfdata.vuorre.com/preprints/preprints_ui">preprints UI table</a></strong>, which contains a denormalized list of all preprints, with contributor and subject information.
+      You are probably most interested in the (perhaps poorly named; <a href="https://github.com/mvuorre/osfdatasette/issues">help me!</a>) <strong><a href="https://osfdata.vuorre.com/preprints/preprints_ui">preprints UI table</a></strong>, which contains a denormalized list of all preprints, with contributor and subject information.
       </p>
       </div>
     source: Open Science Framework

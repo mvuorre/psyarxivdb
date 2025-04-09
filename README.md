@@ -1,4 +1,4 @@
-# OSFdata
+# OSFDatasette
 
 A [Datasette](https://datasette.io/) instance serving preprint data tables from the [Open Science Framework](https://osf.io/) (OSF). Updated daily.
 
@@ -25,7 +25,7 @@ For example, [here](https://osfdata.vuorre.com/preprints/preprints_by_time?granu
 
 ```bash
 # Clone the repository
-git clone https://github.com/mvuorre/osfdata
+git clone https://github.com/mvuorre/osfdatasette
 cd osfdata
 
 # Create and activate virtual environment (with uv)
