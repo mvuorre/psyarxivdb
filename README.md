@@ -45,7 +45,7 @@ uv pip freeze > requirements.txt
 - `datasette/`: Datasette metadata and configuration
 - `osf/`: OSF API client and data ingestion logic
 - `scripts/`: harvesting, ingesting, and optimizing the database
-- `tools/`: daily harvesting and ingesting, miscellaneous
+- `tools/`: miscellaneous ops
 
 ### Data storage
 
@@ -63,11 +63,11 @@ data/preprints.db
 ## Deploy & schedule
 
 - Run `.venv/bin/datasette data/preprints.db --metadata datasette/metadata.yml --host 0.0.0.0 --port 8001` (with e.g. PM2)
-- Schedule `tools/daily_osf_update.sh` with e.g. cron to
+- Schedule `make daily-update` with e.g. cron to
   - harvest preprints from the OSF API
   - ingest new preprints into the SQLite database
   - build the UI table
 
 ## Notes
 
-[Comments](https://github.com/mvuorre/osfdatasette/issues) are welcome. 90% vibe-coded®. Thanks to the OSF and all who submitted preprints.
+[Comments](https://github.com/mvuorre/osfdatasette/issues) are welcome. 85% vibe-coded®. Thanks to the OSF and all who submitted preprints.

@@ -18,47 +18,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger('optimize_cli')
 
-def update_fts_index():
-    """Update the full-text search index for the preprints_ui table."""
-    db = database.get_db()
-    
-    # Check if FTS table exists, if not create it
-    fts_exists = db.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='preprints_ui_fts'"
-    ).fetchone()
-    
-    if not fts_exists:
-        logger.info("Creating FTS table for preprints_ui...")
-        start_time = time.time()
-        
-        # Create FTS table
-        db.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS preprints_ui_fts USING FTS4(
-                title, 
-                description, 
-                contributors_list,
-                content="preprints_ui"
-            )
-        """)
-        
-        # Populate FTS table
-        db.execute("""
-            INSERT INTO preprints_ui_fts(rowid, title, description, contributors_list)
-            SELECT rowid, title, description, contributors_list FROM preprints_ui
-        """)
-        
-        logger.info(f"Created and populated FTS table in {time.time()-start_time:.2f}s")
-    else:
-        logger.info("Updating FTS table...")
-        start_time = time.time()
-        
-        # Rebuild the FTS index
-        db.execute("INSERT INTO preprints_ui_fts(preprints_ui_fts) VALUES('rebuild')")
-        
-        logger.info(f"FTS index updated in {time.time()-start_time:.2f}s")
-    
-    return True
-
 def main():
     # Parse arguments
     parser = argparse.ArgumentParser(description='Optimize the SQLite database')
@@ -102,9 +61,6 @@ def main():
             db.execute("PRAGMA auto_vacuum = FULL")
             db.execute("VACUUM")
             logger.info(f"VACUUM completed in {time.time()-start_time:.2f}s")
-        
-        # Update FTS index
-        update_fts_index()
         
         # Log results
         db_size_after = database.get_database_size()
