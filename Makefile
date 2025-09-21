@@ -58,3 +58,9 @@ daily-update:
 	@sleep 2
 	@$(MAKE) restart
 	@echo "=== Update complete: $$(date) ===" 
+
+dump:
+	sqlite3 $(DB_PATH) ".headers on" ".mode csv" "SELECT * FROM preprints_ui;" | gzip > data/preprints_ui.csv.gz
+
+dump-psyarxiv:
+	sqlite3 $(DB_PATH) "SELECT * FROM preprints WHERE provider='psyarxiv';" -header -csv | gzip > data/psyarxiv.csv.gz
