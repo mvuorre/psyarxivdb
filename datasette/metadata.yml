@@ -1,12 +1,12 @@
-title: PsyArXiv Datasette
+title: PsyArXivDB
 description_html: |-
   <div>
-  <strong>PsyArXiv Datasette</strong> is a <a href="https://datasette.io/">Datasette</a> database instance serving (de)normalized tables of <a href="https://psyarxiv.com/">PsyArXiv</a> preprint metadata from the <a href="https://osf.io/preprints/">Open Science Framework</a> <a href="https://api.osf.io/v2/preprints/">API</a>. Its purpose is to make these (de)normalized data highly available for analyses, webapps, and other uses that require fast access and regular updates. The database is updated daily.
+  <strong>PsyArXivDB</strong> is a <a href="https://datasette.io/">Datasette</a> database instance serving <a href="https://psyarxiv.com/">PsyArXiv</a> preprint metadata from the <a href="https://osf.io/preprints/">Open Science Framework</a> <a href="https://api.osf.io/v2/preprints/">API</a>. Its purpose is to make these data highly available for analyses, webapps, and other uses that require fast access and regular updates. The database is updated daily.
   </div>
   <div>
   <h3>Sources and licenses</h3>
   <p>
-  The code used to create this database is available under the MIT license at <a href="https://github.com/mvuorre/osfdatasette">https://github.com/mvuorre/osfdatasette</a>. All preprints retain their original licenses as indicated in the data; OSF API is used with gratitude and respect.
+  The code used to create this database is available under the MIT license at <a href="https://github.com/mvuorre/psyarxivdb">https://github.com/mvuorre/psyarxivdb</a>. All preprints retain their original licenses as indicated in the data; OSF API is used with gratitude and respect.
   </p>
   </div>
 license: ODbL (database) & original licenses (content)

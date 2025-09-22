@@ -1,10 +1,10 @@
-# PsyArXiv Datasette
+# PsyArXivDB
 
 A [Datasette](https://datasette.io/) instance serving [PsyArXiv](https://psyarxiv.com/) preprint data from the [Open Science Framework](https://osf.io/) (OSF) API. Updated daily.
 
-Browse PsyArXiv preprints at <https://osfdata.vuorre.com>.
+Browse PsyArXiv preprints at <https://psyarxivdb.vuorre.com>.
 
-[Comments](https://github.com/mvuorre/osfdatasette/issues) welcome. Thanks to OSF, PsyArXiv, and all researchers sharing their work.
+[Comments](https://github.com/mvuorre/psyarxivdb/issues) welcome. Thanks to OSF, PsyArXiv, and all researchers sharing their work.
 
 ## Development
 
@@ -17,8 +17,8 @@ Browse PsyArXiv preprints at <https://osfdata.vuorre.com>.
 
 ```bash
 # Clone the repository
-git clone https://github.com/mvuorre/osfdatasette
-cd osfdata
+git clone https://github.com/mvuorre/psyarxivdb
+cd psyarxivdb
 
 # Create and activate virtual environment (with uv)
 uv venv
@@ -86,5 +86,5 @@ make dump                 # Export to CSV
 
 **Cron** (daily at 6 AM):
 ```bash
-0 6 * * * cd /path/to/osfdata && make daily-update
+0 6 * * * cd /path/to/psyarxivdb && make daily-update
 ```
