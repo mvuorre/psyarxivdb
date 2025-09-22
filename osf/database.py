@@ -28,22 +28,23 @@ def get_db():
     return db
 
 def init_db():
-    """Initialize the database with required tables."""
+    """Initialize the database schema for PsyArXiv preprint data."""
     db = get_db()
     
-    # Raw data table to store the JSON responses from OSF API
+    # Store original JSON payloads from OSF API for reprocessing and data safety
     if "raw_data" not in db.table_names():
         db["raw_data"].create({
             "id": str,
             "date_created": str,
             "date_modified": str,
-            "payload": str,  # Either JSON content or file path depending on config
+            "payload": str,  # Complete JSON response from OSF API
             "fetch_date": str
         }, pk="id")
         db["raw_data"].create_index(["date_created"])
+        db["raw_data"].create_index(["date_modified"])
         logger.info("Created raw_data table")
     
-    # Create the main tables for normalized data
+    # Main preprints table with JSON columns for complex data - serves Datasette directly
     if "preprints" not in db.table_names():
         db["preprints"].create({
             "id": str,
@@ -54,89 +55,30 @@ def init_db():
             "date_published": str,
             "original_publication_date": str,
             "publication_doi": str,
-            "provider": str,
-            "is_published": int,  # SQLite boolean (0/1)
+            "preprint_doi": str,
+            "download_url": str,
+            "license": str,
+            "is_published": int,
             "reviews_state": str,
             "version": int,
             "is_latest_version": int,
-            "download_url": str,
-            "preprint_doi": str,
-            "license": str,
-            "tags": str,  # JSON string array of tags
-            "has_coi": int,  # SQLite boolean (0/1)
+            "has_coi": int,
             "conflict_of_interest_statement": str,
             "has_data_links": str,
             "why_no_data": str,
-            "data_links": str,  # JSON string array
+            "data_links": str,  # JSON array
             "has_prereg_links": str,
             "why_no_prereg": str,
-            "prereg_links": str,  # JSON string array
-            "prereg_link_info": str
+            "prereg_links": str,  # JSON array
+            "prereg_link_info": str,
+            # JSON columns - queryable via SQLite JSON functions in Datasette
+            "contributors_json": str,   # Array of contributor objects with names, ORCID, etc.
+            "subjects_json": str,       # Array of subject classifications  
+            "tags_json": str           # Array of keyword tags
         }, pk="id")
         db["preprints"].create_index(["date_created"])
-        db["preprints"].create_index(["provider"])
+        db["preprints"].create_index(["date_modified"])
         logger.info("Created preprints table")
-
-    # Contributors table
-    if "contributors" not in db.table_names():
-        db["contributors"].create({
-            "id": str,
-            "full_name": str,
-            "given_name": str,
-            "middle_names": str,
-            "family_name": str,
-            "suffix": str,
-            "date_registered": str,
-            "active": int,
-            "timezone": str,
-            "locale": str,
-            "orcid": str,
-            "github": str,
-            "scholar": str,
-            "profile_websites": str,  # JSON string
-            "employment": str,  # JSON string
-            "education": str,  # JSON string
-            "profile_url": str
-        }, pk="id")
-        db["contributors"].create_index(["full_name"])
-        db["contributors"].create_index(["orcid"])
-        logger.info("Created contributors table")
-
-    # Many-to-many between preprints and contributors
-    if "preprint_contributors" not in db.table_names():
-        db["preprint_contributors"].create({
-            "preprint_id": str,
-            "contributor_id": str,
-            "contributor_index": int,
-            "bibliographic": int  # SQLite boolean (0/1)
-        }, pk=("preprint_id", "contributor_id"))
-        db["preprint_contributors"].create_index(["preprint_id"])
-        db["preprint_contributors"].create_index(["contributor_id"])
-        logger.info("Created preprint_contributors table")
-
-    # Providers table
-    if "providers" not in db.table_names():
-        db["providers"].create({
-            "id": str
-        }, pk="id")
-        logger.info("Created providers table")
-
-    # Subjects table
-    if "subjects" not in db.table_names():
-        db["subjects"].create({
-            "id": str,
-            "text": str
-        }, pk="id")
-        logger.info("Created subjects table")
-
-    # Many-to-many between preprints and subjects
-    if "preprint_subjects" not in db.table_names():
-        db["preprint_subjects"].create({
-            "preprint_id": str,
-            "subject_id": str
-        }, pk=("preprint_id", "subject_id"))
-        db["preprint_subjects"].create_index(["preprint_id"])
-        logger.info("Created preprint_subjects table")
     
     return db
 
@@ -328,11 +270,8 @@ def recreate_indexes():
     
     # Dictionary of table name to list of columns to index
     indexes = {
-        "preprints": ["date_created", "date_modified", "provider"],
-        "contributors": ["full_name"],
-        "preprint_contributors": ["preprint_id", "contributor_id"],
-        "preprint_subjects": ["preprint_id", "subject_id"],
-        "preprints_ui": ["date_created", "date_modified", "provider", "fulltext"]
+        "preprints": ["date_created", "date_modified"],
+        "raw_data": ["date_created", "date_modified"]
     }
     
     # For each table, drop and recreate indexes
@@ -360,8 +299,6 @@ def reset_database():
         tuple: (success, message)
     """
     try:
-        from osf import tracker
-        
         db = get_db()
         
         # Check and drop FTS tables first (they need special handling)
@@ -392,11 +329,7 @@ def reset_database():
         # Reinitialize the database
         init_db()
         
-        # Reset ingestion status in the tracker database
-        reset_count, reset_success = tracker.reset_ingestion_status()
-        status_msg = f" and reset {reset_count} preprints for re-ingestion" if reset_success else ""
-        
-        return (True, f"Reset database successfully. Dropped and recreated {len(regular_tables)} tables{status_msg}.")
+        return (True, f"Reset database successfully. Dropped and recreated {len(regular_tables)} tables.")
     except Exception as e:
         error_msg = f"Error resetting database: {e}"
         logger.error(error_msg)

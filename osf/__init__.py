@@ -1,8 +1,8 @@
 """
-OSF Preprints Processing
+PsyArXiv Processing
 
-A toolkit for harvesting, processing, and querying OSF preprints data.
-Implements separate concerns for harvesting and ingesting with independent tracking.
+A toolkit for harvesting, processing, and querying PsyArXiv preprints data.
+Simple pipeline: API → raw_data → normalized tables → Datasette.
 """
 
 import logging
@@ -20,8 +20,5 @@ __version__ = "0.1.0"
 # Ensure all modules available for import
 from osf import config
 from osf import database
-from osf import entities
 from osf import harvester
-from osf import ingestor
-from osf import tracker
-from osf import optimizer 
+from osf import ingestor 
