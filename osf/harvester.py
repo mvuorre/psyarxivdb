@@ -1,26 +1,25 @@
 """
-OSF Preprints Harvester
+PsyArXiv Harvester
 
-Core functionality to fetch preprint data from the Open Science Framework (OSF) API.
+Core functionality to fetch PsyArXiv preprint data from the OSF API and store directly in database.
 """
 import json
 import time
 import logging
-from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 
 from osf import config
-from osf import tracker
+from osf import database
 
 logger = logging.getLogger("osf.harvester")
 
 def build_api_url(from_date=None):
-    """Build the OSF API URL with appropriate parameters.
+    """Build the OSF API URL with appropriate parameters for PsyArXiv preprints.
     
     Args:
-        from_date: Date string to use as filter for date_created greater than
+        from_date: Date string to use as filter for date_modified greater than
 
     Returns:
         str: Fully qualified API URL with query parameters
@@ -28,10 +27,10 @@ def build_api_url(from_date=None):
     params = config.DEFAULT_PARAMS.copy()
     
     if from_date:
-        params["filter[date_created][gt]"] = from_date
+        params["filter[date_modified][gt]"] = from_date
     
-    # Always sort by date_created to get oldest first
-    params["sort"] = "date_created"
+    # Always sort by date_modified to get oldest first
+    params["sort"] = "date_modified"
     
     # Build the URL with parameters
     url_parts = []
@@ -44,10 +43,11 @@ def build_api_url(from_date=None):
     
     return f"{config.OSF_API_URL}?{'&'.join(url_parts)}"
 
-def save_preprint(preprint_data):
-    """Save a preprint to file storage and track it in the tracker database.
+def save_preprint(db, preprint_data):
+    """Save a preprint's raw JSON data directly to the database.
     
     Args:
+        db: sqlite-utils database instance
         preprint_data: Dictionary containing preprint data from API
 
     Returns:
@@ -58,62 +58,30 @@ def save_preprint(preprint_data):
         logger.warning("Preprint missing ID, skipping")
         return False
     
-    # Get and validate date_created from the preprint
+    # Get dates from the preprint
     attributes = preprint_data.get('attributes', {})
     date_created = attributes.get('date_created')
     date_modified = attributes.get('date_modified')
     
     try:
-        if date_created:
-            date_obj = datetime.fromisoformat(date_created.replace('Z', '+00:00'))
-        else:
-            logger.warning(f"Preprint {preprint_id} missing date_created, using current date")
-            date_obj = datetime.now()
-            date_created = date_obj.isoformat()
-    except ValueError:
-        logger.warning(f"Couldn't parse date_created: {date_created}, using current date")
-        date_obj = datetime.now()
-        date_created = date_obj.isoformat()
-    
-    # Create directory structure based on preprint creation date
-    dir_path = Path(config.RAW_DATA_DIR) / date_obj.strftime("%Y/%m/%d")
-    dir_path.mkdir(parents=True, exist_ok=True)
-    file_path = dir_path / f"{preprint_id}.json"
-    
-    # Save the JSON file
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(preprint_data, f, ensure_ascii=False, indent=2)
+        # Store raw JSON data in database
+        db["raw_data"].upsert({
+            "id": preprint_id,
+            "date_created": date_created,
+            "date_modified": date_modified,
+            "payload": json.dumps(preprint_data),
+            "fetch_date": datetime.now().isoformat()
+        }, pk="id")
         
-        # File was saved successfully
-        file_saved = True
-        logger.info(f"Saved JSON file for preprint {preprint_id} to {file_path}")
-    except Exception as e:
-        file_saved = False
-        logger.error(f"Error saving JSON file for preprint {preprint_id}: {e}")
-    
-    # Add to tracker database
-    try:
-        tracker_success = tracker.add_harvested_preprint(
-            preprint_id=preprint_id,
-            date_created=date_created,
-            date_modified=date_modified,
-            file_path=str(file_path)
-        )
-        if tracker_success:
-            logger.info(f"Added preprint {preprint_id} to tracker database (date_created: {date_created})")
-    except Exception as e:
-        tracker_success = False
-        logger.error(f"Error adding preprint {preprint_id} to tracker database: {e}")
-    
-    # Consider the operation successful if at least the file was saved
-    if file_saved:
+        logger.info(f"Saved preprint {preprint_id} to raw_data table")
         return True
-    else:
+        
+    except Exception as e:
+        logger.error(f"Error saving preprint {preprint_id} to database: {e}")
         return False
 
 def harvest_preprints(limit=None):
-    """Harvest preprints from the OSF API, continuing from the latest in the tracker.
+    """Harvest PsyArXiv preprints from the OSF API and store directly in database.
     
     Args:
         limit: Maximum number of preprints to harvest, or None for unlimited
@@ -121,20 +89,20 @@ def harvest_preprints(limit=None):
     Returns:
         int: Number of preprints successfully saved
     """
-    # Initialize the tracker database
-    tracker.init_tracker_db()
+    # Initialize the main database
+    db = database.init_db()
     
-    # Get the most recent date from tracker database
-    from_date = tracker.get_most_recent_preprint_date()
+    # Get the most recent modified date from raw_data table
+    from_date = get_most_recent_modified_date(db)
     
     url = build_api_url(from_date)
     preprint_count = 0
     saved_count = 0
     
     # Get the initial count
-    initial_count = tracker.get_harvested_preprint_count()
+    initial_count = db["raw_data"].count
     
-    logger.info(f"Starting harvesting with URL: {url}")
+    logger.info(f"Starting PsyArXiv harvesting with URL: {url}")
     logger.info(f"Limit: {limit or 'None'}, Continue from: {from_date or 'beginning'}")
     
     # Continue fetching next pages until limit is reached or no more results
@@ -146,40 +114,85 @@ def harvest_preprints(limit=None):
             data = response.json()
             
             # Process each preprint in the results
+            last_processed_date = None
             for preprint in data.get('data', []):
                 preprint_count += 1
                 
-                # Skip preprints we've already harvested
-                preprint_id = preprint.get('id')
-                if preprint_id and tracker.is_preprint_harvested(preprint_id):
-                    logger.debug(f"Skipping already harvested preprint {preprint_id}")
-                    continue
+                # Log the current preprint's modified date to show progress
+                attributes = preprint.get('attributes', {})
+                current_date = attributes.get('date_modified', 'unknown')
+                logger.info(f"Processing preprint {preprint.get('id', 'unknown')} (modified: {current_date})")
                 
-                if save_preprint(preprint):
+                if save_preprint(db, preprint):
                     saved_count += 1
+                    # Track the last successfully processed date
+                    last_processed_date = current_date
                 
                 # Check if we've reached the limit
                 if limit and preprint_count >= limit:
                     logger.info(f"Reached limit of {limit} preprints")
                     break
             
-            # Get URL for the next page
-            url = data.get('links', {}).get('next')
+            # Update from_date to the last processed date to prevent gaps
+            if last_processed_date and last_processed_date != 'unknown':
+                from_date = last_processed_date
+                logger.info(f"Continue from: {from_date}")
+            
+            # Get URL for the next page - rebuild with updated date to prevent gaps
+            next_url = data.get('links', {}).get('next')
+            if next_url and last_processed_date and last_processed_date != 'unknown':
+                # Use our updated date instead of the next page URL to prevent gaps
+                url = build_api_url(from_date)
+            else:
+                url = next_url
             
             # If there are more pages, add a delay to avoid rate limits
             if url:
                 time.sleep(config.REQUEST_DELAY)
         
         except requests.exceptions.RequestException as e:
+            # Handle 404 errors by trying an earlier date
+            if "404" in str(e) and from_date:
+                logger.warning(f"API 404 error with date {from_date}, trying 6 hours earlier")
+                dt = datetime.fromisoformat(from_date.replace('Z', '+00:00'))
+                earlier_date = dt - timedelta(hours=6)
+                from_date = earlier_date.strftime('%Y-%m-%dT%H:%M:%S')
+                url = build_api_url(from_date)
+                logger.info(f"Retrying with earlier date: {from_date}")
+                continue
+            
             logger.error(f"API request error: {e}")
             # Add a longer delay on error before retrying
             time.sleep(config.REQUEST_DELAY * 5)
             continue
     
     # Get the final count
-    final_count = tracker.get_harvested_preprint_count()
+    final_count = db["raw_data"].count
     
     logger.info(f"Harvesting complete. Processed {preprint_count} preprints, saved {saved_count}")
-    logger.info(f"Tracker DB now contains {final_count} preprints (added {final_count - initial_count})")
+    logger.info(f"Raw data table now contains {final_count} preprints (added {final_count - initial_count})")
     
-    return saved_count 
+    return saved_count
+
+def get_most_recent_modified_date(db):
+    """Get the most recent date_modified from the raw_data table."""
+    if "raw_data" not in db.table_names():
+        return None
+    
+    # Query for the most recent modified date
+    result = db.execute("""
+        SELECT date_modified 
+        FROM raw_data 
+        WHERE date_modified IS NOT NULL 
+        ORDER BY date_modified DESC
+        LIMIT 1
+    """).fetchone()
+    
+    if result and result[0]:
+        # Remove microseconds from the datetime string to avoid 403 errors
+        date_str = result[0]
+        if '.' in date_str:
+            date_str = date_str.split('.')[0]
+        return date_str
+    
+    return None 

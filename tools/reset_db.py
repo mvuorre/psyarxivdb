@@ -2,32 +2,32 @@
 """
 Reset Database Tool
 
-This script resets the OSF Preprints database, which is useful during development
+This script resets the PsyArXiv database, which is useful during development
 when schema changes are made. It will:
 
 1. Drop all tables in the main database (preprints.db) and recreate them
-2. Preserve the tracker database (tracker.db) which contains records of harvested preprints
-3. Mark all previously ingested preprints as "not ingested" so they'll be reprocessed
-4. Preserve all harvested data files (no need to re-download from OSF API)
+2. Keep raw data in the raw_data table for reprocessing
 
-This allows you to quickly test schema changes without having to re-harvest data.
+This allows you to quickly test schema changes.
 
 Usage:
-    python tools/reset_db.py [--force]
+    python tools/reset_db.py [--force] [--keep-raw]
 
 Options:
-    --force     Skip confirmation prompt
+    --force       Skip confirmation prompt
+    --keep-raw    Keep raw_data table (recommended)
 """
 import argparse
 import logging
 import sys
 import os
 from datetime import datetime
+from pathlib import Path
 
 # Add parent directory to path so we can import osf modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from osf import database, tracker, config
+from osf import database, config
 
 # Configure logging
 logging.basicConfig(
@@ -39,41 +39,35 @@ logger = logging.getLogger("reset_db")
 
 def main():
     """Main function to reset the database."""
-    parser = argparse.ArgumentParser(description="Reset the OSF Preprints database")
+    parser = argparse.ArgumentParser(description="Reset the PsyArXiv database")
     parser.add_argument('--force', action='store_true', help='Skip confirmation prompt')
+    parser.add_argument('--keep-raw', action='store_true', default=True, help='Keep raw_data table')
     args = parser.parse_args()
     
     # Show status before reset
-    db_main_path = config.DB_PATH
-    db_tracker_path = config.TRACKER_DB_PATH
+    db_path = config.DB_PATH
+    print(f"Database: {db_path}")
     
-    print(f"Main database: {db_main_path}")
-    print(f"Tracker database: {db_tracker_path}")
-    
-    # Get counts if databases exist
-    main_count = database.get_preprint_count() if db_main_path.exists() else 0
-    tracker_harvested = tracker.get_harvested_preprint_count() if db_tracker_path.exists() else 0
-    tracker_pending = tracker.get_pending_ingestion_count() if db_tracker_path.exists() else 0
-    
-    # Validate file paths
-    valid_count, invalid_count, total_count = tracker.validate_harvested_file_paths()
-    
-    print(f"\nCurrent status:")
-    print(f"- {main_count} preprints in main database")
-    print(f"- {tracker_harvested} preprints harvested in tracker database")
-    print(f"- {tracker_pending} preprints pending ingestion")
-    print(f"- {tracker_harvested - tracker_pending} preprints already ingested")
-    print(f"- {valid_count} preprints with valid file paths")
-    print(f"- {invalid_count} preprints with invalid file paths")
-    
-    if invalid_count > 0:
-        print("\nWARNING: Some preprints have invalid file paths. These will be skipped during ingestion.")
-        print("You may need to re-harvest these preprints or fix the file paths.")
+    # Get counts if database exists
+    if db_path.exists():
+        db = database.get_db()
+        raw_count = db["raw_data"].count if "raw_data" in db.table_names() else 0
+        preprint_count = db["preprints"].count if "preprints" in db.table_names() else 0
+        
+        print(f"\nCurrent status:")
+        print(f"- {raw_count} preprints in raw_data table")
+        print(f"- {preprint_count} preprints in normalized tables")
+    else:
+        print("Database does not exist yet")
+        raw_count = preprint_count = 0
     
     print("\nThis will:")
-    print("1. Reset the main database schema")
-    print("2. Keep harvested files (no need to re-download)")
-    print("3. Mark all preprints as 'not ingested' to be reprocessed")
+    print("1. Reset the database schema")
+    if args.keep_raw:
+        print("2. Keep raw_data table (recommended)")
+    else:
+        print("2. DELETE all raw data (you'll need to re-harvest)")
+    print("3. Clear all normalized tables")
     
     # Confirm unless --force is used
     if not args.force:
@@ -87,28 +81,53 @@ def main():
     
     # Reset database
     print("\nResetting database...")
-    success, message = database.reset_database()
     
-    if success:
-        # Calculate time taken
-        elapsed = (datetime.now() - start_time).total_seconds()
+    if db_path.exists():
+        # Backup raw data if keeping it
+        raw_data = []
+        if args.keep_raw and raw_count > 0:
+            print("Backing up raw_data...")
+            db = database.get_db()
+            raw_data = list(db.execute("SELECT * FROM raw_data"))
+            print(f"Backed up {len(raw_data)} raw preprints")
         
-        # Get updated counts
-        new_pending = tracker.get_pending_ingestion_count()
-        
-        # Display success message
-        print(f"\nSuccess: {message}")
-        print(f"Completed in {elapsed:.2f} seconds")
-        print(f"\nUpdated status:")
-        print(f"- {new_pending} preprints now pending ingestion")
-        
-        # Show next steps
-        print("\nNext steps:")
-        print("1. Run 'python -m scripts.ingest' to reprocess all preprints")
-        print("2. Run 'python -m scripts.build_ui_table' to rebuild the UI table")
-        print("3. Run 'python -m scripts.optimize --all' to optimize the database")
+        # Remove database file
+        db_path.unlink()
+    
+    # Recreate database
+    db = database.init_db()
+    
+    # Restore raw data if we backed it up
+    if raw_data:
+        print("Restoring raw_data...")
+        # Convert rows to dictionaries for sqlite-utils
+        raw_records = []
+        for row in raw_data:
+            raw_records.append({
+                "id": row[0],
+                "date_created": row[1], 
+                "date_modified": row[2],
+                "payload": row[3],
+                "fetch_date": row[4]
+            })
+        db["raw_data"].insert_all(raw_records)
+        print(f"Restored {len(raw_data)} raw preprints")
+    
+    # Calculate time taken
+    elapsed = (datetime.now() - start_time).total_seconds()
+    
+    # Display success message
+    print(f"\nDatabase reset completed in {elapsed:.2f} seconds")
+    
+    if raw_data:
+        print(f"\nNext steps:")
+        print("1. Run 'make ingest' to reprocess all preprints")
+        print("2. Run 'make setup-fts' to enable full-text search")
     else:
-        print(f"\nFailed: {message}")
+        print(f"\nNext steps:")
+        print("1. Run 'make harvest' to harvest PsyArXiv data")
+        print("2. Run 'make ingest' to process the data")
+        print("3. Run 'make setup-fts' to enable full-text search")
 
 if __name__ == "__main__":
-    main() 
+    main()

@@ -1,24 +1,7 @@
-title: OSFDatasette
+title: PsyArXiv Datasette
 description_html: |-
   <div>
-  <strong>OSFDatasette</strong> is a <a href="https://datasette.io/">Datasette</a> database instance serving (de)normalized tables of preprint metadata from the <a href="https://osf.io/preprints/">Open Science Framework</a> <a href="https://api.osf.io/v2/preprints/">API</a>. Its purpose is to make these (de)normalized data highly available for analyses, webapps, and other uses that require fast access and regular updates. The database is updated daily.
-  </div>
-  <div>
-  <h3>Example uses</h3>
-  <ul style="list-style-type: circle; padding-left: 2em;">
-    <li>
-      Graph preprints by <a href="https://osfdata.vuorre.com/preprints/provider_counts#g.mark=bar&g.x_column=provider&g.x_type=ordinal&g.y_column=count&g.y_type=quantitative">provider</a> or <a href="https://osfdata.vuorre.com/preprints/preprints_by_time?granularity=month#g.mark=bar&g.x_column=time_period&g.x_type=ordinal&g.y_column=count&g.y_type=quantitative">over time</a>
-    </li>
-    <li>
-      <a href="https://osfdata.vuorre.com/preprints/preprints_ui?contributors_list__contains=Vuorre&_sort_desc=date_created">View</a> or <a href="https://osfdata.vuorre.com/preprints/preprints_ui.csv?contributors_list__contains=Matti+Vuorre&_sort_desc=date_created&_size=max&_dl=on">download</a> a denormalized table of a contributor's preprints
-    </li>
-    <li>
-      Search for preprints by title, author, or subject
-    </li>
-    <li>
-      Integrate these or any other (SQL) queries with other apps using the <a href="https://datasette.io/docs/">Datasette</a> custom query URLs
-    </li>
-  </ul>
+  <strong>PsyArXiv Datasette</strong> is a <a href="https://datasette.io/">Datasette</a> database instance serving (de)normalized tables of <a href="https://psyarxiv.com/">PsyArXiv</a> preprint metadata from the <a href="https://osf.io/preprints/">Open Science Framework</a> <a href="https://api.osf.io/v2/preprints/">API</a>. Its purpose is to make these (de)normalized data highly available for analyses, webapps, and other uses that require fast access and regular updates. The database is updated daily.
   </div>
   <div>
   <h3>Sources and licenses</h3>
@@ -32,74 +15,26 @@ source: Open Science Framework
 source_url: https://osf.io/preprints/
 databases:
   preprints:
-    title: OSF Preprints
+    title: PsyArXiv Preprints
     description_html: |-
       <div>
       <p>
       Browse the database tables below or construct custom SQL queries. See <a href="https://datasette.io/docs/">Datasette's documentation</a> for help. Variables in data closely follow the <a href="https://developer.osf.io/#tag/Preprints">Open Science Framework API documentation</a>.
       </p>
-      <p>
-      You are probably most interested in the (perhaps poorly named; <a href="https://github.com/mvuorre/osfdatasette/issues">help me!</a>) <strong><a href="https://osfdata.vuorre.com/preprints/preprints_ui">preprints UI table</a></strong>, which contains a denormalized list of all preprints, with contributor and subject information.
-      </p>
       </div>
     source: Open Science Framework
     source_url: https://developer.osf.io/#tag/Preprints
     tables:
-      preprints_ui:
-        title: Preprints (UI)
-        description: Denormalized preprint data with contributors and subjects for efficient UI access
-        size: 10
-        sort_desc: date_created
-        facets:
-          - provider
       preprints:
         title: Preprints
-        description: Core metadata for each preprint
+        description: Core metadata for each PsyArXiv preprint
         size: 10
         sort_desc: date_created
-        facets:
-          - provider
-      contributors:
-        title: Contributors
-        size: 10
-        description: Authors and contributors to preprints, with detailed profile information including ORCID, employment, education, and social links
-      providers:
-        title: Providers
-        description: Preprint hosting providers
-      subjects:
-        title: Subjects
-        size: 10
-        description: Subject classifications
-      tags:
-        title: Tags
-        size: 10
-        description: Keywords and tags associated with preprints
-      raw_preprints:
-        size: 10
-      sqlite_sequence:
-        hidden: true
-      preprint_contributors:
-        hidden: true
-      preprint_subjects:
-        hidden: true
       raw_data:
         hidden: true
     queries:
-      provider_counts:
-        title: "Preprints by provider"
-        hide_sql: true
-        sql: |-
-          SELECT 
-            provider, 
-            COUNT(*) as count 
-          FROM 
-            preprints 
-          GROUP BY 
-            provider 
-          ORDER BY 
-            count DESC
       preprints_by_time:
-        title: "Preprints over time"
+        title: "PsyArXiv preprints over time"
         hide_sql: true
         sql: |-
           WITH time_data AS (
@@ -142,24 +77,8 @@ databases:
 plugins:
   datasette-vega:
     charts:
-      provider_counts:
-        title: "Preprints by Provider"
-        database: preprints
-        canned_query: provider_counts
-        library: vega-lite
-        chart: {
-          "mark": "bar",
-          "encoding": {
-            "x": {"field": "provider", "type": "nominal", "title": "Provider"},
-            "y": {"field": "count", "type": "quantitative", "title": "Number of Preprints"},
-            "tooltip": [
-              {"field": "provider", "type": "nominal", "title": "Provider"},
-              {"field": "count", "type": "quantitative", "title": "Count"}
-            ]
-          }
-        }
       time_series:
-        title: "Preprints Created Over Time"
+        title: "PsyArXiv Preprints Created Over Time"
         database: preprints
         canned_query: preprints_by_time
         library: vega-lite

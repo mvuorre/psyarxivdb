@@ -1,18 +1,10 @@
-# OSFDatasette
+# PsyArXiv Datasette
 
-A [Datasette](https://datasette.io/) instance serving preprint data tables from the [Open Science Framework](https://osf.io/) (OSF). Updated daily.
+A [Datasette](https://datasette.io/) instance serving [PsyArXiv](https://psyarxiv.com/) preprint data from the [Open Science Framework](https://osf.io/) (OSF) API. Updated daily.
 
-Browse preprints at <https://osfdata.vuorre.com>, where you can easily search, select, and filter preprint metadata according to your needs. 
+Browse PsyArXiv preprints at <https://osfdata.vuorre.com>.
 
-For example, [here](https://osfdata.vuorre.com/preprints/preprints_by_time?granularity=month#g.mark=line&g.x_column=time_period&g.x_type=ordinal&g.y_column=count&g.y_type=quantitative) is a graph of preprints submitted over time, and [here](https://osfdata.vuorre.com/preprints.copyable?sql=select+id%2C+preprint_doi+from+preprints+where+%22date_created%22+like+%3Ap0+and+%22has_data_links%22+%3D+%3Ap1+and+%22provider%22+%3D+%3Ap2+order+by+date_created+desc+limit+11&p0=%25-12-24%25&p1=available&p2=psyarxiv&_table_format=github) are psyArXiv preprints submitted on christmas eve that have data:
-
-| id       | preprint_doi                          |
-|----------|---------------------------------------|
-| 3u748_v1 | https://doi.org/10.31234/osf.io/3u748 |
-| hsdbc_v1 | https://doi.org/10.31234/osf.io/hsdbc |
-| avpk7_v1 | https://doi.org/10.31234/osf.io/avpk7 |
-| j9xdr_v1 | https://doi.org/10.31234/osf.io/j9xdr |
-| 56ugs_v1 | https://doi.org/10.31234/osf.io/56ugs |
+[Comments](https://github.com/mvuorre/osfdatasette/issues) welcome. Thanks to OSF, PsyArXiv, and all researchers sharing their work.
 
 ## Development
 
@@ -35,39 +27,64 @@ source .venv/bin/activate
 # Install dependencies
 uv pip install -r requirements.txt
 
-# Save dependencies when needed
-uv pip freeze > requirements.txt
+# Harvest and process PsyArXiv data
+make harvest    # Fetch raw data from OSF API
+make ingest     # Process into normalized tables
+make setup-fts  # Enable full-text search
+
+# Check status
+make status
 ```
 
-### Codebase
+### Architecture
 
-- `data/`: raw data and SQLite database
-- `datasette/`: Datasette metadata and configuration
-- `osf/`: OSF API client and data ingestion logic
-- `scripts/`: harvesting, ingesting, and optimizing the database
-- `tools/`: miscellaneous ops
+1. **Harvest**: `make harvest` → Fetch PsyArXiv data from OSF API → Store in `raw_data` table
+2. **Ingest**: `make ingest` → Process raw data → Store in `preprints` table with JSON columns
 
-### Data storage
+### Project Structure
 
-Raw preprint data from the OSF API are stored as JSON files
+- `data/preprints.db` - Single SQLite database with all data
+- `osf/` - Core library (harvester, ingestor, database)
+- `scripts/` - CLI tools (`harvest.py`, `ingest.py`)  
+- `tools/` - Admin utilities (`show_status.py`, `reset_db.py`)
+- `datasette/` - Metadata configuration for web interface
+
+### Commands
+
 ```bash
-data/raw/{preprint_year}/{preprint_month}/{preprint_day}/{preprint_id}.json
+make help         # Show all available commands
 ```
 
-And then ingested into a SQLite database:
+## Use
 
+### First Time Setup
 ```bash
-data/preprints.db
+make harvest      # Fetch PsyArXiv data
+make ingest       # Process into tables  
+make setup-fts    # Enable search
 ```
 
-## Deploy & schedule
+### Daily Updates
+```bash
+make daily-update # Full pipeline + restart
+```
 
-- Run `.venv/bin/datasette data/preprints.db --metadata datasette/metadata.yml --host 0.0.0.0 --port 8001` (with e.g. PM2)
-- Schedule `make daily-update` with e.g. cron to
-  - harvest preprints from the OSF API
-  - ingest new preprints into the SQLite database
-  - build the UI table
+### Manual Operations
+```bash
+make harvest --limit 100  # Fetch specific amount
+make status               # Check database state
+make reset                # Reset tables (keeps raw data)
+make dump                 # Export to CSV
+```
 
-## Notes
+## Deploy & Schedule
 
-[Comments](https://github.com/mvuorre/osfdatasette/issues) are welcome. 85% vibe-coded®. Thanks to the OSF and all who submitted preprints.
+**Datasette**: 
+```bash
+.venv/bin/datasette data/preprints.db --metadata datasette/metadata.yml --host 0.0.0.0 --port 8001
+```
+
+**Cron** (daily at 6 AM):
+```bash
+0 6 * * * cd /path/to/osfdata && make daily-update
+```

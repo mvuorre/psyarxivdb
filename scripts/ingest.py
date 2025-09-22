@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-OSF Preprints Ingestion CLI - Import harvested preprint data into SQLite
+PsyArXiv Ingestion CLI - Process raw data into normalized tables
 
 Usage: python scripts/ingest.py [--limit NUM]
 """
@@ -9,9 +9,8 @@ import argparse
 import logging
 import sys
 import traceback
-from osf.ingestor import process_all_new_preprints
+from osf.ingestor import process_all_new_preprints, get_unprocessed_preprints
 from osf import database
-from osf import tracker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,37 +20,37 @@ logger = logging.getLogger('ingest_cli')
 
 def main():
     # Parse arguments
-    parser = argparse.ArgumentParser(description='Ingest harvested preprints into SQLite')
-    parser.add_argument('--limit', type=int, help='Limit the number of preprints to ingest')
+    parser = argparse.ArgumentParser(description='Process raw PsyArXiv data into normalized tables')
+    parser.add_argument('--limit', type=int, help='Limit the number of preprints to process')
     args = parser.parse_args()
     
     try:
         # Setup and check status
-        database.init_db()
-        tracker.init_tracker_db()
+        db = database.init_db()
         
-        initial_count = database.get_preprint_count()
-        pending_count = tracker.get_pending_ingestion_count()
+        initial_count = db["preprints"].count if "preprints" in db.table_names() else 0
+        unprocessed = get_unprocessed_preprints(db, limit=1)  # Just check count
+        pending_count = len(get_unprocessed_preprints(db))
         
-        logger.info(f"Database contains {initial_count} preprints, {pending_count} pending ingestion")
+        logger.info(f"Database contains {initial_count} processed preprints, {pending_count} unprocessed")
         
         # Skip if nothing to do
         if pending_count == 0:
-            logger.info("No preprints to ingest, exiting")
+            logger.info("No preprints to process, exiting")
             return 0
         
         # Process preprints
         processed, success, errors = process_all_new_preprints(limit=args.limit)
         
         # Report results
-        final_count = database.get_preprint_count()
-        logger.info(f"Ingestion complete: {success} added, {errors} errors")
-        logger.info(f"Database now contains {final_count} preprints")
+        final_count = db["preprints"].count if "preprints" in db.table_names() else 0
+        logger.info(f"Processing complete: {success} added, {errors} errors")
+        logger.info(f"Database now contains {final_count} processed preprints")
         
         return 0
         
     except Exception as e:
-        logger.error(f"Ingestion error: {e}")
+        logger.error(f"Processing error: {e}")
         logger.debug(traceback.format_exc())
         return 1
 
