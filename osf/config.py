@@ -19,7 +19,7 @@ DEFAULT_PARAMS = {
     "filter[date_modified][gt]": "2010-01-01",  # Default start date
     "embed": ["contributors", "license"],
     "fields[licenses]": "name",
-    "page[size]": 50
+    "page[size]": 20
 }
 
 # Request configuration
