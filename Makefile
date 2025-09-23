@@ -1,4 +1,4 @@
-.PHONY: setup-fts vacuum analyze harvest ingest help daily-update status reset backup fix-gaps
+.PHONY: setup-fts vacuum analyze harvest ingest help daily-update status fix-gaps
 
 # Database path from osf/config.py
 DB_PATH = data/preprints.db
@@ -12,9 +12,6 @@ help:
 	@echo "  make vacuum         - Compact the database with VACUUM"
 	@echo "  make status         - Show database status"
 	@echo "  make fix-gaps       - Detect and fill gaps in harvested data"
-	@echo "  make reset          - Reset database (keeps raw data)"
-	@echo "  make backup         - Backup raw data table"
-	@echo "  make restart        - Restart the Datasette service"
 	@echo "  make daily-update   - Run the complete daily update process"
 
 # The --create-triggers flag creates SQLite triggers that automatically keep 
@@ -27,12 +24,12 @@ setup-fts:
 
 vacuum:
 	@echo "Running VACUUM (this may take a while)..."
-	.venv/bin/sqlite3 $(DB_PATH) "PRAGMA auto_vacuum = FULL; VACUUM;"
+	sqlite3 $(DB_PATH) "PRAGMA auto_vacuum = FULL; VACUUM;"
 	@echo "VACUUM complete"
 
 analyze:
 	@echo "Running ANALYZE..."
-	.venv/bin/sqlite3 $(DB_PATH) "ANALYZE;"
+	sqlite3 $(DB_PATH) "ANALYZE;"
 	@echo "ANALYZE complete"
 
 harvest:
@@ -53,21 +50,6 @@ fix-gaps:
 	@echo "Detecting and filling gaps in harvested data..."
 	.venv/bin/python tools/fix_gaps.py
 
-reset:
-	@echo "Resetting database (keeping raw data)..."
-	.venv/bin/python tools/reset_db.py --force --keep-raw
-
-backup:
-	@echo "Backing up raw data table..."
-	.venv/bin/sqlite3 $(DB_PATH) ".dump raw_data" | .venv/bin/sqlite3 data/raw_data_backup.db
-	gzip -f data/raw_data_backup.db
-	@echo "Backup complete: data/raw_data_backup.db.gz"
-
-restart:
-	@echo "Restarting Datasette service..."
-	# TODO: Now done with systemctl
-	@echo "Service restarted"
-
 daily-update:
 	@echo "=== PsyArXiv Update: $$(date) ==="
 	@$(MAKE) harvest
@@ -81,5 +63,5 @@ daily-update:
 
 dump:
 	@echo "Exporting PsyArXiv data to CSV..."
-	.venv/bin/sqlite3 $(DB_PATH) ".headers on" ".mode csv" "SELECT * FROM preprints;" | gzip > data/preprints.csv.gz
+	sqlite3 $(DB_PATH) ".headers on" ".mode csv" "SELECT * FROM preprints;" | gzip > data/preprints.csv.gz
 	@echo "Export complete: data/preprints.csv.gz"

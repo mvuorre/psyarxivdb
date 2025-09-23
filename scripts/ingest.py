@@ -2,7 +2,7 @@
 """
 PsyArXiv Ingestion CLI - Process raw data into normalized tables
 
-Usage: python scripts/ingest.py [--limit NUM]
+Usage: python scripts/ingest.py [--limit NUM] [--force]
 """
 
 import argparse
@@ -22,11 +22,19 @@ def main():
     # Parse arguments
     parser = argparse.ArgumentParser(description='Process raw PsyArXiv data into normalized tables')
     parser.add_argument('--limit', type=int, help='Limit the number of preprints to process')
+    parser.add_argument('--force', action='store_true', help='Force reprocessing of all preprints (clears preprints table)')
     args = parser.parse_args()
     
     try:
         # Setup and check status
         db = database.init_db()
+        
+        # Handle force flag - clear preprints table to reprocess everything
+        if args.force:
+            if "preprints" in db.table_names():
+                logger.info("Force flag specified - clearing preprints table for reprocessing")
+                db["preprints"].drop()
+                db = database.init_db()  # Recreate the table
         
         initial_count = db["preprints"].count if "preprints" in db.table_names() else 0
         unprocessed = get_unprocessed_preprints(db, limit=1)  # Just check count
@@ -34,8 +42,8 @@ def main():
         
         logger.info(f"Database contains {initial_count} processed preprints, {pending_count} unprocessed")
         
-        # Skip if nothing to do
-        if pending_count == 0:
+        # Skip if nothing to do (unless force was used)
+        if pending_count == 0 and not args.force:
             logger.info("No preprints to process, exiting")
             return 0
         

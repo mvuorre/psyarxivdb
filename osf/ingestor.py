@@ -32,21 +32,13 @@ def extract_preprint_data(preprint_id, preprint_data):
         
         contributors.append({
             "full_name": user_data.get('full_name', ''),
-            "given_name": user_data.get('given_name', ''),
-            "family_name": user_data.get('family_name', ''),
-            "orcid": user_data.get('social', {}).get('orcid') if user_data.get('social') else None,
+            "date_registered": user_data.get('date_registered'),
             "index": contrib_attrs.get('index', 0),
             "bibliographic": contrib_attrs.get('bibliographic', True)
         })
     
-    # Extract subjects data
-    subjects = []
-    subjects_data = relationships.get('subjects', {}).get('data', [])
-    for subject in subjects_data:
-        subjects.append({
-            "id": subject.get('id', ''),
-            "text": subject.get('attributes', {}).get('text', '') if 'attributes' in subject else ''
-        })
+    # Extract subjects data - subjects is a nested array in attributes
+    subjects = attributes.get('subjects', [])
     
     # Extract tags
     tags = attributes.get('tags', [])
@@ -77,9 +69,9 @@ def extract_preprint_data(preprint_id, preprint_data):
         "prereg_links": json.dumps(attributes.get('prereg_links', [])),
         "prereg_link_info": attributes.get('prereg_link_info'),
         # JSON columns for complex structured data
-        "contributors_json": json.dumps(contributors),
-        "subjects_json": json.dumps(subjects),
-        "tags_json": json.dumps(tags)
+        "contributors": json.dumps(contributors),
+        "subjects": json.dumps(subjects),
+        "tags": json.dumps(tags)
     }
 
 def process_preprint(db, preprint_id, preprint_data):

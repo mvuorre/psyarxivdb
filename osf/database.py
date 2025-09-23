@@ -72,9 +72,9 @@ def init_db():
             "prereg_links": str,  # JSON array
             "prereg_link_info": str,
             # JSON columns - queryable via SQLite JSON functions in Datasette
-            "contributors_json": str,   # Array of contributor objects with names, ORCID, etc.
-            "subjects_json": str,       # Array of subject classifications  
-            "tags_json": str           # Array of keyword tags
+            "contributors": str,   # Array of contributor objects with names, ORCID, etc.
+            "subjects": str,       # Array of subject classifications  
+            "tags": str           # Array of keyword tags
         }, pk="id")
         db["preprints"].create_index(["date_created"])
         db["preprints"].create_index(["date_modified"])

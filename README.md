@@ -8,12 +8,15 @@ Browse PsyArXiv preprints at <https://psyarxivdb.vuorre.com>.
 
 ## Development
 
+Before getting started, get a copy of a current database file from Matti to speed up the setup & avoid unnecessarily stressing the OSF API.
+
 ### Prerequisites
 
-- Python 3.8+
+- Computer etc.
+- Python 3.9+
 - [UV](https://github.com/astral-sh/uv)
 
-### Setup
+### Setup and use
 
 ```bash
 # Clone the repository
@@ -34,57 +37,21 @@ make setup-fts  # Enable full-text search
 
 # Check status
 make status
+
+# Dump processed preprints table as compressed csv
+make dump
+
+# Run daily update of database
+make daily-update
+
+# Show all available commands
+make help
 ```
-
-### Architecture
-
-1. **Harvest**: `make harvest` → Fetch PsyArXiv data from OSF API → Store in `raw_data` table
-2. **Ingest**: `make ingest` → Process raw data → Store in `preprints` table with JSON columns
 
 ### Project Structure
 
-- `data/preprints.db` - Single SQLite database with all data
+- `data/preprints.db` - SQLite database with all data
 - `osf/` - Core library (harvester, ingestor, database)
 - `scripts/` - CLI tools (`harvest.py`, `ingest.py`)  
-- `tools/` - Admin utilities (`show_status.py`, `reset_db.py`)
+- `tools/` - Admin utilities (`show_status.py`, `fix_gaps.py`)
 - `datasette/` - Metadata configuration for web interface
-
-### Commands
-
-```bash
-make help         # Show all available commands
-```
-
-## Use
-
-### First Time Setup
-```bash
-make harvest      # Fetch PsyArXiv data
-make ingest       # Process into tables  
-make setup-fts    # Enable search
-```
-
-### Daily Updates
-```bash
-make daily-update # Full pipeline + restart
-```
-
-### Manual Operations
-```bash
-make harvest --limit 100  # Fetch specific amount
-make status               # Check database state
-make reset                # Reset tables (keeps raw data)
-make dump                 # Export to CSV
-```
-
-## Deploy & Schedule
-
-**Datasette**: 
-```bash
-.venv/bin/datasette data/preprints.db --metadata datasette/metadata.yml --host 0.0.0.0 --port 8001
-```
-
-**Cron** (daily at 6 AM):
-```bash
-0 6 * * * cd /path/to/psyarxivdb && make daily-update
-```
