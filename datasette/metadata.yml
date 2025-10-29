@@ -1,7 +1,7 @@
 title: PsyArXivDB
 description_html: |-
   <div>
-  <strong>PsyArXivDB</strong> is a <a href="https://datasette.io/">Datasette</a> database instance serving <a href="https://psyarxiv.com/">PsyArXiv</a> preprint metadata from the <a href="https://osf.io/preprints/">Open Science Framework</a> <a href="https://api.osf.io/v2/preprints/">API</a>. Its purpose is to make these data highly available for analyses, webapps, and other uses that require fast access and regular updates. The database is updated daily.
+  <strong>PsyArXivDB</strong> is a <a href="https://datasette.io/">Datasette</a> instance serving <a href="https://psyarxiv.com/">PsyArXiv</a> preprint metadata from the <a href="https://osf.io/preprints/">Open Science Framework</a> <a href="https://api.osf.io/v2/preprints/">API</a>. Its purpose is to make these data highly available for analyses, web apps, and other uses that require fast access and regular updates. The database is updated daily.
   </div>
   <div>
   <h3>Sources and licenses</h3>
@@ -30,76 +30,9 @@ databases:
         description: Core metadata for each PsyArXiv preprint
         size: 10
         sort_desc: date_created
+      contributors:
+        hidden: true
+      preprint_contributors:
+        hidden: true
       raw_data:
         hidden: true
-    queries:
-      preprints_by_time:
-        title: "PsyArXiv preprints over time"
-        hide_sql: true
-        sql: |-
-          WITH time_data AS (
-            SELECT
-              -- Get time ranges for different granularities
-              date(date_created) as day,
-              strftime('%Y-%W', date_created) as week,
-              strftime('%Y-%m', date_created) as month,
-              strftime('%Y', date_created) as year,
-              COUNT(*) as count
-            FROM
-              preprints
-            WHERE
-              date_created IS NOT NULL
-            GROUP BY
-              CASE :granularity
-                WHEN 'day' THEN day
-                WHEN 'week' THEN week
-                WHEN 'month' THEN month
-                WHEN 'year' THEN year
-              END
-          )
-          SELECT
-            CASE :granularity
-              WHEN 'day' THEN day
-              WHEN 'week' THEN week 
-              WHEN 'month' THEN month
-              WHEN 'year' THEN year
-            END as time_period,
-            count
-          FROM
-            time_data
-          ORDER BY
-            CASE :granularity
-              WHEN 'day' THEN day
-              WHEN 'week' THEN week
-              WHEN 'month' THEN month 
-              WHEN 'year' THEN year
-            END
-plugins:
-  datasette-vega:
-    charts:
-      time_series:
-        title: "PsyArXiv Preprints Created Over Time"
-        database: preprints
-        canned_query: preprints_by_time
-        library: vega-lite
-        default_parameters:
-          granularity: "month"
-        chart: {
-          "mark": "line",
-          "encoding": {
-            "x": {
-              "field": "time_period", 
-              "type": "temporal", 
-              "title": "Time Period"
-            },
-            "y": {
-              "field": "count", 
-              "type": "quantitative", 
-              "title": "Number of Preprints"
-            },
-            "tooltip": [
-              {"field": "time_period", "type": "temporal", "title": "Date"},
-              {"field": "count", "type": "quantitative", "title": "Preprints"}
-            ]
-          }
-        }

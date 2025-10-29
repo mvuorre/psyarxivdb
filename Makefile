@@ -14,13 +14,6 @@ help:
 	@echo "  make fix-gaps       - Detect and fill gaps in harvested data"
 	@echo "  make daily-update   - Run the complete daily update process"
 
-# The --create-triggers flag creates SQLite triggers that automatically keep 
-# the FTS index in sync when data in the preprints table is inserted, 
-# updated, or deleted. Once set up, no manual update is needed.
-setup-fts:
-	@echo "Setting up full-text search on preprints table..."
-	.venv/bin/sqlite-utils enable-fts $(DB_PATH) preprints title description --create-triggers
-	@echo "FTS setup complete"
 
 vacuum:
 	@echo "Running VACUUM (this may take a while)..."

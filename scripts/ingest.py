@@ -29,12 +29,19 @@ def main():
         # Setup and check status
         db = database.init_db()
         
-        # Handle force flag - clear preprints table to reprocess everything
+        # Handle force flag - clear processed tables to reprocess everything
         if args.force:
-            if "preprints" in db.table_names():
-                logger.info("Force flag specified - clearing preprints table for reprocessing")
-                db["preprints"].drop()
-                db = database.init_db()  # Recreate the table
+            logger.info("Force flag specified - clearing processed tables for reprocessing")
+            
+            # Drop main tables first (this invalidates dependent FTS tables)
+            tables_to_drop = ["preprints", "contributors", "preprint_contributors"]
+            for table_name in tables_to_drop:
+                if table_name in db.table_names():
+                    logger.info(f"Dropping table {table_name}")
+                    db[table_name].drop()
+            
+            
+            db = database.init_db()  # Recreate the tables
         
         initial_count = db["preprints"].count if "preprints" in db.table_names() else 0
         unprocessed = get_unprocessed_preprints(db, limit=1)  # Just check count
@@ -49,6 +56,7 @@ def main():
         
         # Process preprints
         processed, success, errors = process_all_new_preprints(limit=args.limit)
+        
         
         # Report results
         final_count = db["preprints"].count if "preprints" in db.table_names() else 0

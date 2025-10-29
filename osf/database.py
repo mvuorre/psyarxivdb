@@ -80,6 +80,28 @@ def init_db():
         db["preprints"].create_index(["date_modified"])
         logger.info("Created preprints table")
     
+    # Contributors table - normalized contributor data from OSF users
+    if "contributors" not in db.table_names():
+        db["contributors"].create({
+            "osf_user_id": str,
+            "full_name": str,
+            "date_registered": str,
+            "employment": str,  # JSON array of employment history
+        }, pk="osf_user_id")
+        logger.info("Created contributors table")
+    
+    # Preprint-contributors mapping table
+    if "preprint_contributors" not in db.table_names():
+        db["preprint_contributors"].create({
+            "preprint_id": str,
+            "osf_user_id": str,
+            "author_index": int,
+            "bibliographic": int,  # Boolean as int
+        }, pk=["preprint_id", "osf_user_id"])
+        db["preprint_contributors"].create_index(["osf_user_id"])
+        db["preprint_contributors"].create_index(["author_index"])
+        logger.info("Created preprint_contributors table")
+    
     return db
 
 def add_raw_data(preprint_id, data, file_path=None):
@@ -291,46 +313,4 @@ def recreate_indexes():
     
     return index_count
 
-def reset_database():
-    """Reset the database by dropping all tables and recreating them.
-    This should only be used during development when the schema changes.
-    
-    Returns:
-        tuple: (success, message)
-    """
-    try:
-        db = get_db()
-        
-        # Check and drop FTS tables first (they need special handling)
-        # Get the list of all tables, including virtual tables
-        all_tables = db.execute(
-            "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view', 'virtual')"
-        ).fetchall()
-        
-        # First drop any FTS tables which need special handling
-        for table in all_tables:
-            table_name = table[0]
-            table_type = table[1]
-            
-            # Check if it's an FTS table
-            if 'fts' in table_name.lower() or table_type == 'virtual':
-                logger.info(f"Dropping virtual table {table_name}")
-                try:
-                    db.execute(f"DROP TABLE IF EXISTS {table_name}")
-                except Exception as e:
-                    logger.warning(f"Could not drop {table_name}: {e}")
-        
-        # Now drop regular tables
-        regular_tables = [t for t in db.table_names() if 'fts' not in t.lower()]
-        for table in regular_tables:
-            db[table].drop()
-            logger.info(f"Dropped table {table}")
-        
-        # Reinitialize the database
-        init_db()
-        
-        return (True, f"Reset database successfully. Dropped and recreated {len(regular_tables)} tables.")
-    except Exception as e:
-        error_msg = f"Error resetting database: {e}"
-        logger.error(error_msg)
-        return (False, error_msg) 
+ 

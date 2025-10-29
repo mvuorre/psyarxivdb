@@ -74,8 +74,61 @@ def extract_preprint_data(preprint_id, preprint_data):
         "tags": json.dumps(tags)
     }
 
+def extract_contributor_data(preprint_id, preprint_data):
+    """Extract contributor and relationship data from API response.
+    
+    Args:
+        preprint_id: The OSF ID of the preprint
+        preprint_data: Dictionary containing preprint data from API
+        
+    Returns:
+        tuple: (contributors_dict, relationships_list)
+    """
+    embeds = preprint_data.get('embeds', {})
+    contributors_data = embeds.get('contributors', {}).get('data', [])
+    
+    contributors = {}  # osf_user_id -> contributor_data
+    relationships = []  # preprint-contributor relationships
+    
+    for contrib in contributors_data:
+        contrib_attrs = contrib.get('attributes', {})
+        user_embeds = contrib.get('embeds', {})
+        user_data = user_embeds.get('users', {}).get('data', {})
+        
+        if not user_data:
+            continue
+            
+        user_attrs = user_data.get('attributes', {})
+        osf_user_id = user_data.get('id')
+        
+        if not osf_user_id:
+            continue
+        
+        # Extract contributor data
+        contributor_data = {
+            'osf_user_id': osf_user_id,
+            'full_name': user_attrs.get('full_name', ''),
+            'date_registered': user_attrs.get('date_registered'),
+            'employment': json.dumps(user_attrs.get('employment', []))
+        }
+        
+        # Store contributor (will be deduplicated later)
+        contributors[osf_user_id] = contributor_data
+        
+        # Extract relationship data
+        relationship_data = {
+            'preprint_id': preprint_id,
+            'osf_user_id': osf_user_id,
+            'author_index': contrib_attrs.get('index', 0),
+            'bibliographic': 1 if contrib_attrs.get('bibliographic', True) else 0
+        }
+        
+        relationships.append(relationship_data)
+    
+    return contributors, relationships
+
 def process_preprint(db, preprint_id, preprint_data):
-    """Process a single preprint into the main table with JSON columns."""
+    """Process a single preprint into the main table with JSON columns and populate contributor tables."""
     try:
         # Set timeout for database operations
         db.execute("PRAGMA busy_timeout = 5000")
@@ -83,6 +136,17 @@ def process_preprint(db, preprint_id, preprint_data):
         # Extract flattened preprint data with JSON columns
         preprint = extract_preprint_data(preprint_id, preprint_data)
         db["preprints"].upsert(preprint, pk="id")
+        
+        # Extract and process contributor data
+        contributors, relationships = extract_contributor_data(preprint_id, preprint_data)
+        
+        # Upsert contributors (will deduplicate by osf_user_id)
+        if contributors:
+            db["contributors"].upsert_all(contributors.values(), pk="osf_user_id")
+        
+        # Upsert preprint-contributor relationships
+        if relationships:
+            db["preprint_contributors"].upsert_all(relationships, pk=["preprint_id", "osf_user_id"])
         
         return True
         
