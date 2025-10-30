@@ -97,6 +97,7 @@ def init_db():
             "osf_user_id": str,
             "author_index": int,
             "bibliographic": int,  # Boolean as int
+            "is_latest_version": int,  # Boolean as int, from preprints table
         }, pk=["preprint_id", "osf_user_id"])
         db["preprint_contributors"].create_index(["osf_user_id"])
         db["preprint_contributors"].create_index(["author_index"])

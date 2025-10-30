@@ -84,6 +84,7 @@ def extract_contributor_data(preprint_id, preprint_data):
     Returns:
         tuple: (contributors_dict, relationships_list)
     """
+    attributes = preprint_data.get('attributes', {})
     embeds = preprint_data.get('embeds', {})
     contributors_data = embeds.get('contributors', {}).get('data', [])
     
@@ -120,7 +121,8 @@ def extract_contributor_data(preprint_id, preprint_data):
             'preprint_id': preprint_id,
             'osf_user_id': osf_user_id,
             'author_index': contrib_attrs.get('index', 0),
-            'bibliographic': 1 if contrib_attrs.get('bibliographic', True) else 0
+            'bibliographic': 1 if contrib_attrs.get('bibliographic', True) else 0,
+            'is_latest_version': 1 if attributes.get('is_latest_version', True) else 0
         }
         
         relationships.append(relationship_data)
