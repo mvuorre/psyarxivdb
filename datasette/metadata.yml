@@ -13,6 +13,9 @@ license: ODbL (database) & original licenses (content)
 license_url: https://opendatacommons.org/licenses/odbl/
 source: Open Science Framework
 source_url: https://osf.io/preprints/
+plugins:
+  datasette-cors:
+    allow_all: true
 databases:
   preprints:
     title: PsyArXiv Preprints
@@ -32,6 +35,11 @@ databases:
         sort_desc: date_created
       contributors:
         hidden: true
+      contributors_with_counts:
+        title: Contributors with Preprint Counts
+        description: Contributors and their number of PsyArXiv preprints
+        size: 20
+        sort_desc: n_preprints
       preprint_contributors:
         hidden: true
       raw_data:
