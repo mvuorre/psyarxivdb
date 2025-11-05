@@ -210,6 +210,14 @@ def process_all_new_preprints(limit=None):
                     db.conn.commit()
     
     logger.info(f"Processing complete: {success} added, {errors} failed")
+    
+    # Fix is_latest_version flags after processing if any preprints were successfully added
+    if success > 0:
+        logger.info("Fixing is_latest_version flags after batch processing")
+        preprints_fixed = fix_latest_version_flags(db)
+        contributors_fixed = fix_contributor_latest_version_flags(db)
+        logger.info(f"Version flag fixes: {preprints_fixed} preprints, {contributors_fixed} contributor relationships")
+    
     return processed, success, errors
 
 def get_unprocessed_preprints(db, limit=None):
@@ -234,4 +242,115 @@ def get_unprocessed_preprints(db, limit=None):
     for row in db.execute(query):
         results.append({"id": row[0], "payload": row[1]})
     
-    return results 
+    return results
+
+def fix_latest_version_flags(db):
+    """Fix is_latest_version flags in preprints table based on actual version numbers.
+    
+    This function groups preprints by their base ID (everything before '_v') and ensures
+    only the highest version number has is_latest_version=1.
+    
+    Args:
+        db: sqlite-utils database instance
+        
+    Returns:
+        int: Number of preprints that had their is_latest_version flag updated
+    """
+    logger.info("Starting to fix is_latest_version flags in preprints table")
+    
+    # Query to find all preprints grouped by base ID with their versions
+    query = """
+        SELECT 
+            id,
+            version,
+            is_latest_version,
+            CASE 
+                WHEN id LIKE '%_v%' THEN SUBSTR(id, 1, INSTR(id, '_v') - 1)
+                ELSE id
+            END as base_id
+        FROM preprints
+        ORDER BY base_id, version DESC
+    """
+    
+    results = list(db.execute(query))
+    if not results:
+        logger.info("No preprints found to process")
+        return 0
+    
+    # Group by base_id and track what needs to be updated
+    updates_needed = []
+    current_base_id = None
+    highest_version_seen = False
+    
+    for row in results:
+        preprint_id = row[0]
+        version = row[1]
+        current_is_latest = row[2]
+        base_id = row[3]
+        
+        # If we're starting a new base_id group, reset the flag
+        if base_id != current_base_id:
+            current_base_id = base_id
+            highest_version_seen = False
+        
+        # The first record for each base_id (sorted by version DESC) should be latest
+        should_be_latest = not highest_version_seen
+        
+        # If the current flag doesn't match what it should be, mark for update
+        if (should_be_latest and current_is_latest != 1) or (not should_be_latest and current_is_latest != 0):
+            updates_needed.append({
+                'id': preprint_id,
+                'is_latest_version': 1 if should_be_latest else 0
+            })
+        
+        # Mark that we've seen the highest version for this base_id
+        if not highest_version_seen:
+            highest_version_seen = True
+    
+    # Apply the updates
+    if updates_needed:
+        logger.info(f"Updating is_latest_version for {len(updates_needed)} preprints")
+        with db.conn:
+            for update in updates_needed:
+                db.execute(
+                    "UPDATE preprints SET is_latest_version = ? WHERE id = ?",
+                    [update['is_latest_version'], update['id']]
+                )
+        logger.info(f"Successfully updated {len(updates_needed)} preprints")
+    else:
+        logger.info("No updates needed - all is_latest_version flags are correct")
+    
+    return len(updates_needed)
+
+def fix_contributor_latest_version_flags(db):
+    """Fix is_latest_version flags in preprint_contributors table to match preprints table.
+    
+    Args:
+        db: sqlite-utils database instance
+        
+    Returns:
+        int: Number of contributor relationships that had their is_latest_version flag updated
+    """
+    logger.info("Starting to fix is_latest_version flags in preprint_contributors table")
+    
+    # Update contributor table to match the corrected preprints table
+    query = """
+        UPDATE preprint_contributors 
+        SET is_latest_version = (
+            SELECT p.is_latest_version 
+            FROM preprints p 
+            WHERE p.id = preprint_contributors.preprint_id
+        )
+        WHERE EXISTS (
+            SELECT 1 FROM preprints p 
+            WHERE p.id = preprint_contributors.preprint_id
+            AND p.is_latest_version != preprint_contributors.is_latest_version
+        )
+    """
+    
+    with db.conn:
+        cursor = db.execute(query)
+        updated_count = cursor.rowcount
+    
+    logger.info(f"Updated is_latest_version for {updated_count} contributor relationships")
+    return updated_count

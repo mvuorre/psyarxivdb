@@ -1,4 +1,4 @@
-.PHONY: setup-fts vacuum analyze harvest ingest help daily-update status fix-gaps
+.PHONY: setup-fts vacuum analyze harvest ingest help daily-update status fix-gaps fix-version-flags
 
 # Database path from osf/config.py
 DB_PATH = data/preprints.db
@@ -12,6 +12,7 @@ help:
 	@echo "  make vacuum         - Compact the database with VACUUM"
 	@echo "  make status         - Show database status"
 	@echo "  make fix-gaps       - Detect and fill gaps in harvested data"
+	@echo "  make fix-version-flags - Fix is_latest_version flags for all preprints"
 	@echo "  make daily-update   - Run the complete daily update process"
 
 
@@ -43,11 +44,17 @@ fix-gaps:
 	@echo "Detecting and filling gaps in harvested data..."
 	.venv/bin/python tools/fix_gaps.py
 
+fix-version-flags:
+	@echo "Fixing is_latest_version flags for all preprints..."
+	.venv/bin/python tools/fix_version_flags.py
+
 daily-update:
 	@echo "=== PsyArXiv Update: $$(date) ==="
 	@$(MAKE) harvest
 	@sleep 2
 	@$(MAKE) ingest
+	@sleep 2
+	@$(MAKE) fix-version-flags
 	@sleep 2
 	@$(MAKE) analyze
 	@sleep 2
