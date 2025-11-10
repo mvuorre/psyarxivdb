@@ -33,14 +33,5 @@ databases:
         description: Core metadata for each PsyArXiv preprint
         size: 10
         sort_desc: date_created
-      contributors:
-        hidden: true
-      contributors_with_counts:
-        title: Contributors with Preprint Counts
-        description: Contributors and their number of PsyArXiv preprints
-        size: 20
-        sort_desc: n_preprints
-      preprint_contributors:
-        hidden: true
       raw_data:
         hidden: true

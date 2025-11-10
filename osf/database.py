@@ -103,6 +103,71 @@ def init_db():
         db["preprint_contributors"].create_index(["author_index"])
         logger.info("Created preprint_contributors table")
     
+    # Subjects table - normalized subject classifications
+    if "subjects" not in db.table_names():
+        db["subjects"].create({
+            "id": str,  # OSF subject ID 
+            "text": str,  # Subject name
+            "parent_id": str,  # For hierarchical structure, NULL for top-level
+        }, pk="id")
+        db["subjects"].create_index(["parent_id"])
+        logger.info("Created subjects table")
+    
+    # Preprint-subjects mapping table
+    if "preprint_subjects" not in db.table_names():
+        db["preprint_subjects"].create({
+            "preprint_id": str,
+            "subject_id": str,
+            "is_latest_version": int,  # Boolean as int
+        }, pk=["preprint_id", "subject_id"])
+        db["preprint_subjects"].create_index(["subject_id"])
+        logger.info("Created preprint_subjects table")
+    
+    # Tags table - normalized tag data with usage tracking
+    if "tags" not in db.table_names():
+        db["tags"].create({
+            "id": int,  # Auto-increment primary key
+            "tag_text": str,  # Cleaned and normalized tag text
+            "use_count": int,  # Number of preprints using this tag
+        }, pk="id")
+        db["tags"].create_index(["tag_text"], unique=True)
+        logger.info("Created tags table")
+    
+    # Preprint-tags mapping table
+    if "preprint_tags" not in db.table_names():
+        db["preprint_tags"].create({
+            "preprint_id": str,
+            "tag_id": int,
+            "is_latest_version": int,  # Boolean as int
+        }, pk=["preprint_id", "tag_id"])
+        db["preprint_tags"].create_index(["tag_id"])
+        logger.info("Created preprint_tags table")
+    
+    # Institutions table - for future ROR integration
+    if "institutions" not in db.table_names():
+        db["institutions"].create({
+            "id": int,  # Auto-increment primary key
+            "name": str,  # Institution name (cleaned)
+            "ror_id": str,  # ROR identifier (NULL for now)
+            "country": str,  # Country (NULL for now)
+            "metadata": str,  # JSON field for additional ROR data
+        }, pk="id")
+        db["institutions"].create_index(["name"])
+        db["institutions"].create_index(["ror_id"])
+        logger.info("Created institutions table")
+    
+    # Contributor-institution affiliations table
+    if "contributor_affiliations" not in db.table_names():
+        db["contributor_affiliations"].create({
+            "contributor_id": str,  # osf_user_id
+            "institution_id": int,
+            "position": str,  # Job title/position
+            "start_date": str,  # Employment start date
+            "end_date": str,  # Employment end date (NULL if current)
+        }, pk=["contributor_id", "institution_id", "start_date"])
+        db["contributor_affiliations"].create_index(["institution_id"])
+        logger.info("Created contributor_affiliations table")
+    
     return db
 
 def add_raw_data(preprint_id, data, file_path=None):
@@ -294,7 +359,14 @@ def recreate_indexes():
     # Dictionary of table name to list of columns to index
     indexes = {
         "preprints": ["date_created", "date_modified"],
-        "raw_data": ["date_created", "date_modified"]
+        "raw_data": ["date_created", "date_modified"],
+        "subjects": ["parent_id"],
+        "preprint_subjects": ["subject_id"],
+        "tags": ["tag_text"],
+        "preprint_tags": ["tag_id"],
+        "institutions": ["name", "ror_id"],
+        "contributor_affiliations": ["institution_id"],
+        "preprint_contributors": ["osf_user_id", "author_index"]
     }
     
     # For each table, drop and recreate indexes

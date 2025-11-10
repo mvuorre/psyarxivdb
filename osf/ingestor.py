@@ -1,12 +1,227 @@
 """PsyArXiv SQLite Ingestion - Process raw data into main table"""
 import json
 import logging
+import re
 from tqdm import tqdm
 
 from osf import config
 from osf import database
 
 logger = logging.getLogger("osf.ingestor")
+
+def clean_and_parse_tags(tags_data):
+    """Clean and parse tags from various input formats.
+    
+    Args:
+        tags_data: List of tag strings or strings with comma/semicolon separation
+        
+    Returns:
+        list: List of cleaned tag strings
+    """
+    if not tags_data:
+        return []
+    
+    cleaned_tags = []
+    
+    for tag in tags_data:
+        if not tag or not isinstance(tag, str):
+            continue
+            
+        # Split on commas and semicolons to handle user input errors
+        split_tags = re.split(r'[,;]+', tag)
+        
+        for split_tag in split_tags:
+            # Clean the tag: strip whitespace, normalize case
+            clean_tag = split_tag.strip()
+            if clean_tag:
+                # Convert to lowercase for normalization but preserve original case in display
+                cleaned_tags.append(clean_tag)
+    
+    # Remove duplicates while preserving order
+    return list(dict.fromkeys(cleaned_tags))
+
+def normalize_tag_text(tag_text):
+    """Normalize tag text for storage and comparison.
+    
+    Args:
+        tag_text: Original tag text
+        
+    Returns:
+        str: Normalized tag text
+    """
+    if not tag_text:
+        return ""
+    
+    # Strip whitespace, normalize to lowercase
+    normalized = tag_text.strip().lower()
+    
+    # Remove excessive whitespace
+    normalized = re.sub(r'\s+', ' ', normalized)
+    
+    return normalized
+
+def get_or_create_tag_id(db, tag_text):
+    """Get existing tag ID or create new tag, updating usage count.
+    
+    Args:
+        db: Database instance
+        tag_text: Tag text to process
+        
+    Returns:
+        int: Tag ID
+    """
+    if not tag_text:
+        return None
+    
+    normalized_tag = normalize_tag_text(tag_text)
+    if not normalized_tag:
+        return None
+    
+    # Try to find existing tag
+    existing = list(db.execute(
+        "SELECT id, use_count FROM tags WHERE tag_text = ?", 
+        [normalized_tag]
+    ))
+    
+    if existing:
+        tag_id = existing[0][0]  # First column: id
+        current_count = existing[0][1]  # Second column: use_count
+        # Update usage count
+        db.execute(
+            "UPDATE tags SET use_count = ? WHERE id = ?",
+            [current_count + 1, tag_id]
+        )
+        return tag_id
+    else:
+        # Create new tag
+        result = db["tags"].insert({
+            "tag_text": normalized_tag,
+            "use_count": 1
+        })
+        return result.last_pk
+
+def get_or_create_institution_id(db, institution_name):
+    """Get existing institution ID or create new institution.
+    
+    Args:
+        db: Database instance
+        institution_name: Institution name to process
+        
+    Returns:
+        int: Institution ID or None if invalid
+    """
+    if not institution_name or not isinstance(institution_name, str):
+        return None
+    
+    # Clean institution name
+    clean_name = institution_name.strip()
+    if not clean_name:
+        return None
+    
+    # Try to find existing institution (case-insensitive)
+    existing = list(db.execute(
+        "SELECT id FROM institutions WHERE LOWER(name) = LOWER(?)", 
+        [clean_name]
+    ))
+    
+    if existing:
+        return existing[0][0]  # First column: id
+    else:
+        # Create new institution
+        result = db["institutions"].insert({
+            "name": clean_name,
+            "ror_id": None,
+            "country": None,
+            "metadata": json.dumps({})
+        })
+        return result.last_pk
+
+def process_subjects_data(db, subjects_data):
+    """Process subjects data and ensure all subjects and hierarchies are stored.
+    
+    Args:
+        db: Database instance
+        subjects_data: List of subject classification arrays
+        
+    Returns:
+        list: List of subject IDs that were processed
+    """
+    if not subjects_data:
+        return []
+    
+    all_subject_ids = []
+    
+    for subject_hierarchy in subjects_data:
+        if not subject_hierarchy or not isinstance(subject_hierarchy, list):
+            continue
+        
+        parent_id = None
+        
+        # Process each level in the hierarchy
+        for level_idx, subject in enumerate(subject_hierarchy):
+            if not isinstance(subject, dict):
+                continue
+                
+            subject_id = subject.get('id')
+            subject_text = subject.get('text')
+            
+            if not subject_id or not subject_text:
+                continue
+            
+            # Upsert the subject
+            db["subjects"].upsert({
+                "id": subject_id,
+                "text": subject_text,
+                "parent_id": parent_id
+            }, pk="id")
+            
+            all_subject_ids.append(subject_id)
+            
+            # Set this subject as parent for next level
+            parent_id = subject_id
+    
+    return all_subject_ids
+
+def extract_employment_data(employment_json):
+    """Extract and parse employment data from contributor JSON.
+    
+    Args:
+        employment_json: JSON string containing employment array
+        
+    Returns:
+        list: List of employment dictionaries with institution info
+    """
+    if not employment_json:
+        return []
+    
+    try:
+        employment_data = json.loads(employment_json) if isinstance(employment_json, str) else employment_json
+        if not employment_data or not isinstance(employment_data, list):
+            return []
+        
+        parsed_employment = []
+        for employment in employment_data:
+            if not isinstance(employment, dict):
+                continue
+                
+            # Extract institution name and employment details
+            institution_name = employment.get('institution')
+            position = employment.get('title') or employment.get('position')
+            start_date = employment.get('startMonth') or employment.get('start_date')
+            end_date = employment.get('endMonth') or employment.get('end_date')
+            
+            if institution_name:
+                parsed_employment.append({
+                    'institution': institution_name,
+                    'position': position,
+                    'start_date': start_date,
+                    'end_date': end_date
+                })
+        
+        return parsed_employment
+        
+    except (json.JSONDecodeError, TypeError):
+        return []
 
 def extract_preprint_data(preprint_id, preprint_data):
     """Extract and flatten PsyArXiv preprint data from API response.
@@ -130,7 +345,7 @@ def extract_contributor_data(preprint_id, preprint_data):
     return contributors, relationships
 
 def process_preprint(db, preprint_id, preprint_data):
-    """Process a single preprint into the main table with JSON columns and populate contributor tables."""
+    """Process a single preprint into the main table with JSON columns and populate all normalized tables."""
     try:
         # Set timeout for database operations
         db.execute("PRAGMA busy_timeout = 5000")
@@ -139,12 +354,73 @@ def process_preprint(db, preprint_id, preprint_data):
         preprint = extract_preprint_data(preprint_id, preprint_data)
         db["preprints"].upsert(preprint, pk="id")
         
+        # Get basic preprint attributes for normalized processing
+        attributes = preprint_data.get('attributes', {})
+        is_latest = 1 if attributes.get('is_latest_version', True) else 0
+        
+        # Process subjects data
+        subjects_data = attributes.get('subjects', [])
+        if subjects_data:
+            subject_ids = process_subjects_data(db, subjects_data)
+            if subject_ids:
+                # Create preprint-subject relationships
+                subject_relationships = []
+                for subject_id in subject_ids:
+                    subject_relationships.append({
+                        'preprint_id': preprint_id,
+                        'subject_id': subject_id,
+                        'is_latest_version': is_latest
+                    })
+                if subject_relationships:
+                    db["preprint_subjects"].upsert_all(subject_relationships, pk=["preprint_id", "subject_id"])
+        
+        # Process tags data
+        tags_data = attributes.get('tags', [])
+        if tags_data:
+            cleaned_tags = clean_and_parse_tags(tags_data)
+            if cleaned_tags:
+                tag_relationships = []
+                for tag_text in cleaned_tags:
+                    tag_id = get_or_create_tag_id(db, tag_text)
+                    if tag_id:
+                        tag_relationships.append({
+                            'preprint_id': preprint_id,
+                            'tag_id': tag_id,
+                            'is_latest_version': is_latest
+                        })
+                if tag_relationships:
+                    db["preprint_tags"].upsert_all(tag_relationships, pk=["preprint_id", "tag_id"])
+        
         # Extract and process contributor data
         contributors, relationships = extract_contributor_data(preprint_id, preprint_data)
         
         # Upsert contributors (will deduplicate by osf_user_id)
         if contributors:
             db["contributors"].upsert_all(contributors.values(), pk="osf_user_id")
+            
+            # Process employment/affiliation data for each contributor
+            for osf_user_id, contributor_data in contributors.items():
+                employment_json = contributor_data.get('employment', '[]')
+                employment_list = extract_employment_data(employment_json)
+                
+                if employment_list:
+                    affiliation_relationships = []
+                    for employment in employment_list:
+                        institution_id = get_or_create_institution_id(db, employment['institution'])
+                        if institution_id:
+                            affiliation_relationships.append({
+                                'contributor_id': osf_user_id,
+                                'institution_id': institution_id,
+                                'position': employment.get('position'),
+                                'start_date': employment.get('start_date'),
+                                'end_date': employment.get('end_date')
+                            })
+                    
+                    if affiliation_relationships:
+                        db["contributor_affiliations"].upsert_all(
+                            affiliation_relationships, 
+                            pk=["contributor_id", "institution_id", "start_date"]
+                        )
         
         # Upsert preprint-contributor relationships
         if relationships:
