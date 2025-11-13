@@ -184,32 +184,56 @@ def process_subjects_data(db, subjects_data):
 
 def extract_employment_data(employment_json):
     """Extract and parse employment data from contributor JSON.
-    
+
     Args:
         employment_json: JSON string containing employment array
-        
+
     Returns:
         list: List of employment dictionaries with institution info
     """
     if not employment_json:
         return []
-    
+
     try:
         employment_data = json.loads(employment_json) if isinstance(employment_json, str) else employment_json
         if not employment_data or not isinstance(employment_data, list):
             return []
-        
+
         parsed_employment = []
         for employment in employment_data:
             if not isinstance(employment, dict):
                 continue
-                
+
             # Extract institution name and employment details
             institution_name = employment.get('institution')
             position = employment.get('title') or employment.get('position')
-            start_date = employment.get('startMonth') or employment.get('start_date')
-            end_date = employment.get('endMonth') or employment.get('end_date')
-            
+
+            # Construct full dates from year and month fields
+            start_year = employment.get('startYear')
+            start_month = employment.get('startMonth')
+            end_year = employment.get('endYear')
+            end_month = employment.get('endMonth')
+
+            # Build start_date as YYYY-MM-DD
+            start_date = None
+            if start_year and str(start_year).strip():  # Handle empty strings
+                try:
+                    year = int(start_year)
+                    month = int(start_month) if start_month and start_month > 0 else 1
+                    start_date = f"{year:04d}-{month:02d}-01"
+                except (ValueError, TypeError):
+                    pass
+
+            # Build end_date as YYYY-MM-DD
+            end_date = None
+            if end_year and str(end_year).strip():  # Handle empty strings
+                try:
+                    year = int(end_year)
+                    month = int(end_month) if end_month and end_month > 0 else 1
+                    end_date = f"{year:04d}-{month:02d}-01"
+                except (ValueError, TypeError):
+                    pass
+
             if institution_name:
                 parsed_employment.append({
                     'institution': institution_name,
@@ -217,9 +241,9 @@ def extract_employment_data(employment_json):
                     'start_date': start_date,
                     'end_date': end_date
                 })
-        
+
         return parsed_employment
-        
+
     except (json.JSONDecodeError, TypeError):
         return []
 
