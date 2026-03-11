@@ -1,4 +1,4 @@
-.PHONY: setup-fts vacuum analyze harvest ingest help daily-update status fix-gaps fix-version-flags
+.PHONY: vacuum analyze harvest ingest help daily-update status fix-gaps fix-version-flags
 
 # Database path from osf/config.py
 DB_PATH = data/preprints.db
@@ -7,7 +7,6 @@ help:
 	@echo "Available commands:"
 	@echo "  make harvest        - Harvest PsyArXiv preprints from OSF API"
 	@echo "  make ingest         - Process raw data into normalized tables"
-	@echo "  make setup-fts      - Set up full-text search index with triggers"
 	@echo "  make analyze        - Run ANALYZE on the database to improve query performance"
 	@echo "  make vacuum         - Compact the database with VACUUM"
 	@echo "  make status         - Show database status"

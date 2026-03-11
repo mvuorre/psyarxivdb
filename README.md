@@ -33,7 +33,6 @@ uv pip install -r requirements.txt
 # Harvest and process PsyArXiv data
 make harvest    # Fetch raw data from OSF API
 make ingest     # Process into normalized tables
-make setup-fts  # Enable full-text search
 
 # Check status
 make status
