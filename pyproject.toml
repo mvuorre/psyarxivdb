@@ -1,6 +1,6 @@
 [project]
 name = "psyarxivdb"
-version = "0.1.0"
+version = "0.1.1"
 description = "A tool to harvest PsyArXiv preprint data and serve it with Datasette."
 authors = [
     {name = "Matti Vuorre", email = "mjvuorre@uvt.nl"}
@@ -61,4 +61,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["osf"] 
+packages = ["osf"]

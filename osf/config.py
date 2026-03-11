@@ -12,13 +12,14 @@ LOGS_DIR = Path("logs")
 # API configuration
 OSF_API_URL = "https://api.osf.io/v2/preprints/"
 
-# Default URL parameters - PsyArXiv only
+# Default URL parameters
 DEFAULT_PARAMS = {
     "sort": "date_modified",
     "filter[provider]": "psyarxiv",  # Only fetch PsyArXiv preprints
     "filter[date_modified][gt]": "2010-01-01",  # Default start date
     "embed": ["contributors", "license"],
     "fields[licenses]": "name",
+    "filter[reviews_state][ne]": "pending",  # Preprints under moderation no longer publicly accessible
     "page[size]": 20
 }
 
