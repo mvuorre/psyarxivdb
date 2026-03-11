@@ -23,12 +23,11 @@ Before getting started, get a copy of a current database file from Matti to spee
 git clone https://github.com/mvuorre/psyarxivdb
 cd psyarxivdb
 
-# Create and activate virtual environment (with uv)
-uv venv
-source .venv/bin/activate
+# Create .venv and install dependencies from pyproject.toml + uv.lock
+uv sync --frozen
 
-# Install dependencies
-uv pip install -r requirements.txt
+# Optional: activate the environment in your shell
+source .venv/bin/activate
 
 # Harvest and process PsyArXiv data
 make harvest    # Fetch raw data from OSF API
