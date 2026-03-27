@@ -11,15 +11,104 @@ from osf import config
 
 logger = logging.getLogger("osf.database")
 
-def get_db():
+CONTRIBUTORS_WITH_COUNTS_VIEW_SQL = """
+CREATE VIEW contributors_with_counts AS
+SELECT
+    c.osf_user_id,
+    c.full_name,
+    c.date_registered,
+    c.employment,
+    COALESCE(counts.n_preprints, 0) AS n_preprints
+FROM contributors AS c
+LEFT JOIN (
+    SELECT
+        pc.osf_user_id,
+        COUNT(DISTINCT pc.preprint_id) AS n_preprints
+    FROM preprint_contributors AS pc
+    JOIN preprints AS p ON p.id = pc.preprint_id
+    WHERE pc.bibliographic = 1
+      AND pc.is_latest_version = 1
+      AND p.is_latest_version = 1
+    GROUP BY pc.osf_user_id
+) AS counts ON counts.osf_user_id = c.osf_user_id
+"""
+
+CONTRIBUTOR_FIRST_APPEARANCE_REFRESH_SQL = """
+INSERT INTO dashboard_contributor_first_appearance_by_date (date, count)
+SELECT
+    first_date AS date,
+    COUNT(*) AS count
+FROM (
+    SELECT
+        pc.osf_user_id AS contributor_id,
+        MIN(DATE(p.date_created)) AS first_date
+    FROM preprints AS p
+    JOIN preprint_contributors AS pc ON pc.preprint_id = p.id
+    WHERE p.is_latest_version = 1
+      AND pc.bibliographic = 1
+      AND pc.is_latest_version = 1
+    GROUP BY pc.osf_user_id
+) AS first_appearances
+WHERE first_date IS NOT NULL
+GROUP BY first_date
+ORDER BY first_date
+"""
+
+AFFILIATION_FIRST_APPEARANCE_REFRESH_SQL = """
+INSERT INTO dashboard_affiliation_first_appearance_by_date (date, count)
+SELECT
+    first_date AS date,
+    COUNT(*) AS count
+FROM (
+    SELECT
+        i.id AS institution_id,
+        MIN(DATE(p.date_created)) AS first_date
+    FROM preprints AS p
+    JOIN preprint_contributors AS pc ON pc.preprint_id = p.id
+    JOIN contributor_affiliations AS ca ON ca.contributor_id = pc.osf_user_id
+    JOIN institutions AS i ON i.id = ca.institution_id
+    WHERE p.is_latest_version = 1
+      AND pc.bibliographic = 1
+      AND pc.is_latest_version = 1
+      AND ca.end_date IS NULL
+      AND i.name IS NOT NULL
+    GROUP BY i.id
+) AS first_appearances
+WHERE first_date IS NOT NULL
+GROUP BY first_date
+ORDER BY first_date
+"""
+
+QUERY_SUPPORT_INDEXES = (
+    """
+    CREATE INDEX IF NOT EXISTS idx_preprint_contributors_bibliographic_latest_user_preprint
+    ON preprint_contributors (osf_user_id, preprint_id)
+    WHERE bibliographic = 1 AND is_latest_version = 1
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_contributor_affiliations_current_contributor_institution
+    ON contributor_affiliations (contributor_id, institution_id)
+    WHERE end_date IS NULL
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_contributor_affiliations_current_institution_contributor
+    ON contributor_affiliations (institution_id, contributor_id)
+    WHERE end_date IS NULL
+    """,
+)
+
+
+def get_db(db_path=None):
     """Get a sqlite-utils Database instance connected to the main database.
     
     Returns:
         sqlite_utils.Database: Database instance
     """
+    db_path = Path(db_path or config.DB_PATH)
+
     # Ensure parent directory exists
-    config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite_utils.Database(config.DB_PATH)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite_utils.Database(db_path)
     
     # Set a busy timeout to prevent "database is locked" errors
     # This waits up to 10 seconds if the database is locked
@@ -27,9 +116,64 @@ def get_db():
     
     return db
 
-def init_db():
+def ensure_derived_views(db):
+    """Create derived views for common queries."""
+    db.execute("DROP VIEW IF EXISTS contributors_with_counts")
+    db.execute(CONTRIBUTORS_WITH_COUNTS_VIEW_SQL)
+
+
+def ensure_dashboard_query_support(db):
+    """Create the small tables and indexes used by the dashboard."""
+    for index_sql in QUERY_SUPPORT_INDEXES:
+        db.execute(index_sql)
+
+    if "dashboard_contributor_first_appearance_by_date" not in db.table_names():
+        db["dashboard_contributor_first_appearance_by_date"].create({
+            "date": str,
+            "count": int,
+        }, pk="date")
+        logger.info("Created dashboard_contributor_first_appearance_by_date table")
+
+    if "dashboard_affiliation_first_appearance_by_date" not in db.table_names():
+        db["dashboard_affiliation_first_appearance_by_date"].create({
+            "date": str,
+            "count": int,
+        }, pk="date")
+        logger.info("Created dashboard_affiliation_first_appearance_by_date table")
+
+
+def refresh_dashboard_summary_tables(db=None):
+    """Rebuild the small summary tables used by the dashboard."""
+    db = db or get_db()
+    ensure_dashboard_query_support(db)
+
+    with db.conn:
+        db.execute("DELETE FROM dashboard_contributor_first_appearance_by_date")
+        db.execute(CONTRIBUTOR_FIRST_APPEARANCE_REFRESH_SQL)
+        db.execute("DELETE FROM dashboard_affiliation_first_appearance_by_date")
+        db.execute(AFFILIATION_FIRST_APPEARANCE_REFRESH_SQL)
+
+    contributor_rows = db.execute(
+        "SELECT COUNT(*) FROM dashboard_contributor_first_appearance_by_date"
+    ).fetchone()[0]
+    affiliation_rows = db.execute(
+        "SELECT COUNT(*) FROM dashboard_affiliation_first_appearance_by_date"
+    ).fetchone()[0]
+    logger.info(
+        "Refreshed dashboard summary tables: %s contributor dates, %s affiliation dates",
+        contributor_rows,
+        affiliation_rows,
+    )
+
+    return {
+        "dashboard_contributor_first_appearance_by_date": contributor_rows,
+        "dashboard_affiliation_first_appearance_by_date": affiliation_rows,
+    }
+
+
+def init_db(db=None):
     """Initialize the database schema for PsyArXiv preprint data."""
-    db = get_db()
+    db = db or get_db()
     
     # Store original JSON payloads from OSF API for reprocessing and data safety
     if "raw_data" not in db.table_names():
@@ -167,6 +311,9 @@ def init_db():
         }, pk=["contributor_id", "institution_id", "start_date"])
         db["contributor_affiliations"].create_index(["institution_id"])
         logger.info("Created contributor_affiliations table")
+
+    ensure_dashboard_query_support(db)
+    ensure_derived_views(db)
     
     return db
 
@@ -383,6 +530,10 @@ def recreate_indexes():
             # Recreate the index
             db.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table} ({column})")
             index_count += 1
+
+    for index_sql in QUERY_SUPPORT_INDEXES:
+        db.execute(index_sql)
+        index_count += 1
     
     return index_count
 

@@ -517,6 +517,8 @@ def process_all_new_preprints(limit=None):
         preprints_fixed = fix_latest_version_flags(db)
         contributors_fixed = fix_contributor_latest_version_flags(db)
         logger.info(f"Version flag fixes: {preprints_fixed} preprints, {contributors_fixed} contributor relationships")
+        logger.info("Refreshing dashboard summary tables")
+        database.refresh_dashboard_summary_tables(db)
     
     return processed, success, errors
 

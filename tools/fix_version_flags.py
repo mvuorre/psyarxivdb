@@ -167,6 +167,9 @@ def main():
         
         preprints_fixed = fix_latest_version_flags(db)
         contributors_fixed = fix_contributor_latest_version_flags(db)
+        if preprints_fixed > 0 or contributors_fixed > 0:
+            logger.info("Refreshing dashboard summary tables...")
+            database.refresh_dashboard_summary_tables(db)
         
         logger.info(f"Fix complete:")
         logger.info(f"  - Updated {preprints_fixed} preprint version flags")
