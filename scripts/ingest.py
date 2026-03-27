@@ -49,6 +49,7 @@ def main():
                 "dashboard_contributors_on_preprints_by_date",
                 "dashboard_top_contributors",
                 "dashboard_affiliations_on_preprints_by_date",
+                "dashboard_subject_counts",
             ]
             for table_name in tables_to_drop:
                 if table_name in db.table_names():

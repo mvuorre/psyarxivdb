@@ -133,6 +133,41 @@ GROUP BY date
 ORDER BY date
 """
 
+SUBJECT_COUNTS_REFRESH_SQL = """
+INSERT INTO dashboard_subject_counts (id, text, parent_id, level, count)
+WITH RECURSIVE hierarchy AS (
+    SELECT
+        id,
+        text,
+        parent_id,
+        1 AS level
+    FROM subjects
+    WHERE parent_id IS NULL OR parent_id = ''
+
+    UNION ALL
+
+    SELECT
+        s.id,
+        s.text,
+        s.parent_id,
+        h.level + 1
+    FROM subjects AS s
+    JOIN hierarchy AS h ON s.parent_id = h.id
+)
+SELECT
+    h.id,
+    h.text,
+    h.parent_id,
+    h.level,
+    COUNT(DISTINCT ps.preprint_id) AS count
+FROM hierarchy AS h
+LEFT JOIN preprint_subjects AS ps
+    ON h.id = ps.subject_id
+   AND ps.is_latest_version = 1
+GROUP BY h.id, h.text, h.parent_id, h.level
+ORDER BY count DESC
+"""
+
 QUERY_SUPPORT_INDEXES = (
     """
     CREATE INDEX IF NOT EXISTS idx_preprint_contributors_bibliographic_latest_user_preprint
@@ -217,6 +252,16 @@ def ensure_dashboard_query_support(db):
         }, pk="date")
         logger.info("Created dashboard_affiliations_on_preprints_by_date table")
 
+    if "dashboard_subject_counts" not in db.table_names():
+        db["dashboard_subject_counts"].create({
+            "id": str,
+            "text": str,
+            "parent_id": str,
+            "level": int,
+            "count": int,
+        }, pk="id")
+        logger.info("Created dashboard_subject_counts table")
+
 
 def refresh_dashboard_summary_tables(db=None):
     """Rebuild the small summary tables used by the dashboard."""
@@ -234,6 +279,8 @@ def refresh_dashboard_summary_tables(db=None):
         db.execute(TOP_CONTRIBUTORS_REFRESH_SQL)
         db.execute("DELETE FROM dashboard_affiliations_on_preprints_by_date")
         db.execute(AFFILIATIONS_ON_PREPRINTS_REFRESH_SQL)
+        db.execute("DELETE FROM dashboard_subject_counts")
+        db.execute(SUBJECT_COUNTS_REFRESH_SQL)
 
     summary_counts = {
         "dashboard_contributor_first_appearance_by_date": db.execute(
@@ -250,6 +297,9 @@ def refresh_dashboard_summary_tables(db=None):
         ).fetchone()[0],
         "dashboard_affiliations_on_preprints_by_date": db.execute(
             "SELECT COUNT(*) FROM dashboard_affiliations_on_preprints_by_date"
+        ).fetchone()[0],
+        "dashboard_subject_counts": db.execute(
+            "SELECT COUNT(*) FROM dashboard_subject_counts"
         ).fetchone()[0],
     }
     logger.info(
