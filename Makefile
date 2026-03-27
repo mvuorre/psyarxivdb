@@ -84,6 +84,8 @@ daily-update:
 	@sleep 2
 	@$(MAKE) fix-version-flags
 	@sleep 2
+	@$(MAKE) refresh-dashboard-summaries
+	@sleep 2
 	@$(MAKE) analyze
 	@sleep 2
 	@$(MAKE) vacuum
