@@ -3,6 +3,7 @@ Database utilities for OSF Preprints using sqlite-utils.
 """
 import json
 import logging
+import re
 import sqlite_utils
 from datetime import datetime
 from pathlib import Path
@@ -10,28 +11,6 @@ from pathlib import Path
 from osf import config
 
 logger = logging.getLogger("osf.database")
-
-CONTRIBUTORS_WITH_COUNTS_VIEW_SQL = """
-CREATE VIEW contributors_with_counts AS
-SELECT
-    c.osf_user_id,
-    c.full_name,
-    c.date_registered,
-    c.employment,
-    COALESCE(counts.n_preprints, 0) AS n_preprints
-FROM contributors AS c
-LEFT JOIN (
-    SELECT
-        pc.osf_user_id,
-        COUNT(DISTINCT pc.preprint_id) AS n_preprints
-    FROM preprint_contributors AS pc
-    JOIN preprints AS p ON p.id = pc.preprint_id
-    WHERE pc.bibliographic = 1
-      AND pc.is_latest_version = 1
-      AND p.is_latest_version = 1
-    GROUP BY pc.osf_user_id
-) AS counts ON counts.osf_user_id = c.osf_user_id
-"""
 
 CONTRIBUTOR_FIRST_APPEARANCE_REFRESH_SQL = """
 INSERT INTO dashboard_contributor_first_appearance_by_date (date, count)
@@ -168,6 +147,16 @@ GROUP BY h.id, h.text, h.parent_id, h.level
 ORDER BY count DESC
 """
 
+TAG_USE_COUNTS_REFRESH_SQL = """
+UPDATE tags
+SET use_count = (
+    SELECT COUNT(DISTINCT pt.preprint_id)
+    FROM preprint_tags AS pt
+    WHERE pt.tag_id = tags.id
+      AND pt.is_latest_version = 1
+)
+"""
+
 QUERY_SUPPORT_INDEXES = (
     """
     CREATE INDEX IF NOT EXISTS idx_preprint_contributors_bibliographic_latest_user_preprint
@@ -187,6 +176,237 @@ QUERY_SUPPORT_INDEXES = (
 )
 
 
+def _clean_text(value):
+    if value is None:
+        return None
+    cleaned = re.sub(r"\s+", " ", str(value)).strip()
+    return cleaned or None
+
+
+def _institution_lookup_key(name):
+    cleaned = _clean_text(name)
+    return cleaned.casefold() if cleaned else None
+
+
+def _parse_employment_date(year_value, month_value):
+    try:
+        year = int(str(year_value).strip())
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+    if year < 1000 or year > 9999:
+        return None
+
+    try:
+        month = int(str(month_value).strip())
+    except (AttributeError, TypeError, ValueError):
+        month = 1
+
+    if month < 1 or month > 12:
+        month = 1
+
+    return f"{year:04d}-{month:02d}-01"
+
+
+def _iter_employment_rows(contributor_id, employment_json):
+    if not employment_json:
+        return
+
+    try:
+        employment_entries = json.loads(employment_json) if isinstance(employment_json, str) else employment_json
+    except (json.JSONDecodeError, TypeError):
+        return
+
+    if not isinstance(employment_entries, list):
+        return
+
+    for employment in employment_entries:
+        if not isinstance(employment, dict):
+            continue
+
+        institution_name = _clean_text(employment.get("institution"))
+        if not institution_name:
+            continue
+
+        yield {
+            "contributor_id": contributor_id,
+            "institution_name": institution_name,
+            "position": _clean_text(employment.get("title")) or _clean_text(employment.get("position")),
+            "start_date": _parse_employment_date(
+                employment.get("startYear"),
+                employment.get("startMonth"),
+            ),
+            "end_date": _parse_employment_date(
+                employment.get("endYear"),
+                employment.get("endMonth"),
+            ),
+        }
+
+
+def ensure_contributor_affiliations_schema(db):
+    expected_columns = {
+        "contributor_id",
+        "institution_id",
+        "position",
+        "start_date",
+        "start_date_key",
+        "end_date",
+    }
+
+    if "contributor_affiliations" not in db.table_names():
+        db["contributor_affiliations"].create({
+            "contributor_id": str,  # osf_user_id
+            "institution_id": int,
+            "position": str,  # Job title/position
+            "start_date": str,  # Employment start date
+            "start_date_key": str,  # Non-null key for stable deduplication
+            "end_date": str,  # Employment end date (NULL if current)
+        }, pk=["contributor_id", "institution_id", "start_date_key"])
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_contributor_affiliations_institution_id "
+            "ON contributor_affiliations (institution_id)"
+        )
+        logger.info("Created contributor_affiliations table")
+        return
+
+    existing_columns = {
+        row[1]
+        for row in db.execute("PRAGMA table_info(contributor_affiliations)")
+    }
+    if expected_columns.issubset(existing_columns):
+        return
+
+    logger.info("Migrating contributor_affiliations table to start_date_key schema")
+    with db.conn:
+        db.execute("DROP TABLE IF EXISTS contributor_affiliations_legacy")
+        db.execute("ALTER TABLE contributor_affiliations RENAME TO contributor_affiliations_legacy")
+        db.execute("DROP INDEX IF EXISTS idx_contributor_affiliations_institution_id")
+        db["contributor_affiliations"].create({
+            "contributor_id": str,
+            "institution_id": int,
+            "position": str,
+            "start_date": str,
+            "start_date_key": str,
+            "end_date": str,
+        }, pk=["contributor_id", "institution_id", "start_date_key"])
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_contributor_affiliations_institution_id "
+            "ON contributor_affiliations (institution_id)"
+        )
+        db.execute(
+            """
+            INSERT INTO contributor_affiliations (
+                contributor_id,
+                institution_id,
+                position,
+                start_date,
+                start_date_key,
+                end_date
+            )
+            SELECT
+                contributor_id,
+                institution_id,
+                NULLIF(MAX(COALESCE(position, '')), ''),
+                NULLIF(MAX(COALESCE(start_date, '')), ''),
+                COALESCE(start_date, ''),
+                CASE
+                    WHEN SUM(CASE WHEN end_date IS NULL THEN 1 ELSE 0 END) > 0 THEN NULL
+                    ELSE MAX(end_date)
+                END
+            FROM contributor_affiliations_legacy
+            GROUP BY contributor_id, institution_id, COALESCE(start_date, '')
+            """
+        )
+        db.execute("DROP TABLE contributor_affiliations_legacy")
+
+
+def rebuild_contributor_affiliations(db):
+    institution_map = {
+        _institution_lookup_key(name): institution_id
+        for institution_id, name in db.execute(
+            "SELECT id, name FROM institutions WHERE name IS NOT NULL"
+        )
+        if _institution_lookup_key(name)
+    }
+
+    parsed_rows = []
+    missing_institutions = {}
+    for contributor_id, employment_json in db.execute(
+        "SELECT osf_user_id, employment FROM contributors WHERE employment IS NOT NULL AND employment != '[]'"
+    ):
+        for row in _iter_employment_rows(contributor_id, employment_json):
+            lookup_key = _institution_lookup_key(row["institution_name"])
+            parsed_rows.append((lookup_key, row))
+            if lookup_key and lookup_key not in institution_map and lookup_key not in missing_institutions:
+                missing_institutions[lookup_key] = row["institution_name"]
+
+    if missing_institutions:
+        db["institutions"].insert_all(
+            [
+                {
+                    "name": name,
+                    "ror_id": None,
+                    "country": None,
+                    "metadata": "{}",
+                }
+                for name in sorted(missing_institutions.values())
+            ],
+            batch_size=500,
+        )
+        institution_map = {
+            _institution_lookup_key(name): institution_id
+            for institution_id, name in db.execute(
+                "SELECT id, name FROM institutions WHERE name IS NOT NULL"
+            )
+            if _institution_lookup_key(name)
+        }
+
+    affiliation_rows = {}
+    for lookup_key, row in parsed_rows:
+        institution_id = institution_map.get(lookup_key)
+        if institution_id is None:
+            continue
+
+        start_date_key = row["start_date"] or ""
+        affiliation_key = (row["contributor_id"], institution_id, start_date_key)
+        existing = affiliation_rows.get(affiliation_key)
+
+        if existing is None:
+            affiliation_rows[affiliation_key] = {
+                "contributor_id": row["contributor_id"],
+                "institution_id": institution_id,
+                "position": row["position"],
+                "start_date": row["start_date"],
+                "start_date_key": start_date_key,
+                "end_date": row["end_date"],
+            }
+            continue
+
+        if row["position"] and (
+            not existing["position"] or len(row["position"]) > len(existing["position"])
+        ):
+            existing["position"] = row["position"]
+
+        if existing["end_date"] is None or row["end_date"] is None:
+            existing["end_date"] = None
+        elif row["end_date"] > existing["end_date"]:
+            existing["end_date"] = row["end_date"]
+
+    with db.conn:
+        db.execute("DELETE FROM contributor_affiliations")
+        if affiliation_rows:
+            db["contributor_affiliations"].insert_all(
+                affiliation_rows.values(),
+                batch_size=1000,
+            )
+
+    logger.info(
+        "Rebuilt contributor_affiliations with %s rows (%s new institutions)",
+        len(affiliation_rows),
+        len(missing_institutions),
+    )
+
+
 def get_db(db_path=None):
     """Get a sqlite-utils Database instance connected to the main database.
     
@@ -204,13 +424,6 @@ def get_db(db_path=None):
     db.execute("PRAGMA busy_timeout = 10000")
     
     return db
-
-def ensure_derived_views(db):
-    """Create derived views for common queries."""
-    db.execute("DROP VIEW IF EXISTS contributors_with_counts")
-    db.execute(CONTRIBUTORS_WITH_COUNTS_VIEW_SQL)
-
-
 def ensure_dashboard_query_support(db):
     """Create the small tables and indexes used by the dashboard."""
     for index_sql in QUERY_SUPPORT_INDEXES:
@@ -267,6 +480,10 @@ def refresh_dashboard_summary_tables(db=None):
     """Rebuild the small summary tables used by the dashboard."""
     db = db or get_db()
     ensure_dashboard_query_support(db)
+    ensure_contributor_affiliations_schema(db)
+
+    db.execute(TAG_USE_COUNTS_REFRESH_SQL)
+    rebuild_contributor_affiliations(db)
 
     with db.conn:
         db.execute("DELETE FROM dashboard_contributor_first_appearance_by_date")
@@ -439,20 +656,10 @@ def init_db(db=None):
         db["institutions"].create_index(["ror_id"])
         logger.info("Created institutions table")
     
-    # Contributor-institution affiliations table
-    if "contributor_affiliations" not in db.table_names():
-        db["contributor_affiliations"].create({
-            "contributor_id": str,  # osf_user_id
-            "institution_id": int,
-            "position": str,  # Job title/position
-            "start_date": str,  # Employment start date
-            "end_date": str,  # Employment end date (NULL if current)
-        }, pk=["contributor_id", "institution_id", "start_date"])
-        db["contributor_affiliations"].create_index(["institution_id"])
-        logger.info("Created contributor_affiliations table")
+    ensure_contributor_affiliations_schema(db)
 
     ensure_dashboard_query_support(db)
-    ensure_derived_views(db)
+    db.execute("DROP VIEW IF EXISTS contributors_with_counts")
     
     return db
 

@@ -4,7 +4,6 @@ import logging
 import re
 from tqdm import tqdm
 
-from osf import config
 from osf import database
 
 logger = logging.getLogger("osf.ingestor")
@@ -61,7 +60,7 @@ def normalize_tag_text(tag_text):
     return normalized
 
 def get_or_create_tag_id(db, tag_text):
-    """Get existing tag ID or create new tag, updating usage count.
+    """Get existing tag ID or create a new tag.
     
     Args:
         db: Database instance
@@ -77,64 +76,19 @@ def get_or_create_tag_id(db, tag_text):
     if not normalized_tag:
         return None
     
-    # Try to find existing tag
     existing = list(db.execute(
-        "SELECT id, use_count FROM tags WHERE tag_text = ?", 
+        "SELECT id FROM tags WHERE tag_text = ?",
         [normalized_tag]
     ))
     
     if existing:
-        tag_id = existing[0][0]  # First column: id
-        current_count = existing[0][1]  # Second column: use_count
-        # Update usage count
-        db.execute(
-            "UPDATE tags SET use_count = ? WHERE id = ?",
-            [current_count + 1, tag_id]
-        )
-        return tag_id
-    else:
-        # Create new tag
-        result = db["tags"].insert({
-            "tag_text": normalized_tag,
-            "use_count": 1
-        })
-        return result.last_pk
+        return existing[0][0]
 
-def get_or_create_institution_id(db, institution_name):
-    """Get existing institution ID or create new institution.
-    
-    Args:
-        db: Database instance
-        institution_name: Institution name to process
-        
-    Returns:
-        int: Institution ID or None if invalid
-    """
-    if not institution_name or not isinstance(institution_name, str):
-        return None
-    
-    # Clean institution name
-    clean_name = institution_name.strip()
-    if not clean_name:
-        return None
-    
-    # Try to find existing institution (case-insensitive)
-    existing = list(db.execute(
-        "SELECT id FROM institutions WHERE LOWER(name) = LOWER(?)", 
-        [clean_name]
-    ))
-    
-    if existing:
-        return existing[0][0]  # First column: id
-    else:
-        # Create new institution
-        result = db["institutions"].insert({
-            "name": clean_name,
-            "ror_id": None,
-            "country": None,
-            "metadata": json.dumps({})
-        })
-        return result.last_pk
+    result = db["tags"].insert({
+        "tag_text": normalized_tag,
+        "use_count": 0
+    })
+    return result.last_pk
 
 def process_subjects_data(db, subjects_data):
     """Process subjects data and ensure all subjects and hierarchies are stored.
@@ -181,71 +135,6 @@ def process_subjects_data(db, subjects_data):
             parent_id = subject_id
     
     return all_subject_ids
-
-def extract_employment_data(employment_json):
-    """Extract and parse employment data from contributor JSON.
-
-    Args:
-        employment_json: JSON string containing employment array
-
-    Returns:
-        list: List of employment dictionaries with institution info
-    """
-    if not employment_json:
-        return []
-
-    try:
-        employment_data = json.loads(employment_json) if isinstance(employment_json, str) else employment_json
-        if not employment_data or not isinstance(employment_data, list):
-            return []
-
-        parsed_employment = []
-        for employment in employment_data:
-            if not isinstance(employment, dict):
-                continue
-
-            # Extract institution name and employment details
-            institution_name = employment.get('institution')
-            position = employment.get('title') or employment.get('position')
-
-            # Construct full dates from year and month fields
-            start_year = employment.get('startYear')
-            start_month = employment.get('startMonth')
-            end_year = employment.get('endYear')
-            end_month = employment.get('endMonth')
-
-            # Build start_date as YYYY-MM-DD
-            start_date = None
-            if start_year and str(start_year).strip():  # Handle empty strings
-                try:
-                    year = int(start_year)
-                    month = int(start_month) if start_month and start_month > 0 else 1
-                    start_date = f"{year:04d}-{month:02d}-01"
-                except (ValueError, TypeError):
-                    pass
-
-            # Build end_date as YYYY-MM-DD
-            end_date = None
-            if end_year and str(end_year).strip():  # Handle empty strings
-                try:
-                    year = int(end_year)
-                    month = int(end_month) if end_month and end_month > 0 else 1
-                    end_date = f"{year:04d}-{month:02d}-01"
-                except (ValueError, TypeError):
-                    pass
-
-            if institution_name:
-                parsed_employment.append({
-                    'institution': institution_name,
-                    'position': position,
-                    'start_date': start_date,
-                    'end_date': end_date
-                })
-
-        return parsed_employment
-
-    except (json.JSONDecodeError, TypeError):
-        return []
 
 def extract_preprint_data(preprint_id, preprint_data):
     """Extract and flatten PsyArXiv preprint data from API response.
@@ -418,33 +307,9 @@ def process_preprint(db, preprint_id, preprint_data):
         # Extract and process contributor data
         contributors, relationships = extract_contributor_data(preprint_id, preprint_data)
         
-        # Upsert contributors (will deduplicate by osf_user_id)
+        # Upsert contributors; related affiliation rows are rebuilt after the batch.
         if contributors:
             db["contributors"].upsert_all(contributors.values(), pk="osf_user_id")
-            
-            # Process employment/affiliation data for each contributor
-            for osf_user_id, contributor_data in contributors.items():
-                employment_json = contributor_data.get('employment', '[]')
-                employment_list = extract_employment_data(employment_json)
-                
-                if employment_list:
-                    affiliation_relationships = []
-                    for employment in employment_list:
-                        institution_id = get_or_create_institution_id(db, employment['institution'])
-                        if institution_id:
-                            affiliation_relationships.append({
-                                'contributor_id': osf_user_id,
-                                'institution_id': institution_id,
-                                'position': employment.get('position'),
-                                'start_date': employment.get('start_date'),
-                                'end_date': employment.get('end_date')
-                            })
-                    
-                    if affiliation_relationships:
-                        db["contributor_affiliations"].upsert_all(
-                            affiliation_relationships, 
-                            pk=["contributor_id", "institution_id", "start_date"]
-                        )
         
         # Upsert preprint-contributor relationships
         if relationships:
