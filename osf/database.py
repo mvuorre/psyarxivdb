@@ -79,6 +79,60 @@ GROUP BY first_date
 ORDER BY first_date
 """
 
+CONTRIBUTORS_ON_PREPRINTS_REFRESH_SQL = """
+INSERT INTO dashboard_contributors_on_preprints_by_date (date, count)
+SELECT
+    DATE(p.date_created) AS date,
+    COUNT(DISTINCT pc.osf_user_id) AS count
+FROM preprints AS p
+JOIN preprint_contributors AS pc ON pc.preprint_id = p.id
+WHERE p.is_latest_version = 1
+  AND pc.bibliographic = 1
+  AND pc.is_latest_version = 1
+GROUP BY date
+ORDER BY date
+"""
+
+TOP_CONTRIBUTORS_REFRESH_SQL = """
+INSERT INTO dashboard_top_contributors (osf_user_id, contributor_name, preprint_count)
+SELECT
+    c.osf_user_id,
+    c.full_name AS contributor_name,
+    counts.n_preprints AS preprint_count
+FROM contributors AS c
+JOIN (
+    SELECT
+        pc.osf_user_id,
+        COUNT(DISTINCT pc.preprint_id) AS n_preprints
+    FROM preprint_contributors AS pc
+    JOIN preprints AS p ON p.id = pc.preprint_id
+    WHERE pc.bibliographic = 1
+      AND pc.is_latest_version = 1
+      AND p.is_latest_version = 1
+    GROUP BY pc.osf_user_id
+) AS counts ON counts.osf_user_id = c.osf_user_id
+WHERE c.full_name IS NOT NULL
+  AND counts.n_preprints > 0
+"""
+
+AFFILIATIONS_ON_PREPRINTS_REFRESH_SQL = """
+INSERT INTO dashboard_affiliations_on_preprints_by_date (date, count)
+SELECT
+    DATE(p.date_created) AS date,
+    COUNT(DISTINCT i.id) AS count
+FROM preprints AS p
+JOIN preprint_contributors AS pc ON pc.preprint_id = p.id
+JOIN contributor_affiliations AS ca ON ca.contributor_id = pc.osf_user_id
+JOIN institutions AS i ON i.id = ca.institution_id
+WHERE p.is_latest_version = 1
+  AND pc.bibliographic = 1
+  AND pc.is_latest_version = 1
+  AND ca.end_date IS NULL
+  AND i.name IS NOT NULL
+GROUP BY date
+ORDER BY date
+"""
+
 QUERY_SUPPORT_INDEXES = (
     """
     CREATE INDEX IF NOT EXISTS idx_preprint_contributors_bibliographic_latest_user_preprint
@@ -141,6 +195,28 @@ def ensure_dashboard_query_support(db):
         }, pk="date")
         logger.info("Created dashboard_affiliation_first_appearance_by_date table")
 
+    if "dashboard_contributors_on_preprints_by_date" not in db.table_names():
+        db["dashboard_contributors_on_preprints_by_date"].create({
+            "date": str,
+            "count": int,
+        }, pk="date")
+        logger.info("Created dashboard_contributors_on_preprints_by_date table")
+
+    if "dashboard_top_contributors" not in db.table_names():
+        db["dashboard_top_contributors"].create({
+            "osf_user_id": str,
+            "contributor_name": str,
+            "preprint_count": int,
+        }, pk="osf_user_id")
+        logger.info("Created dashboard_top_contributors table")
+
+    if "dashboard_affiliations_on_preprints_by_date" not in db.table_names():
+        db["dashboard_affiliations_on_preprints_by_date"].create({
+            "date": str,
+            "count": int,
+        }, pk="date")
+        logger.info("Created dashboard_affiliations_on_preprints_by_date table")
+
 
 def refresh_dashboard_summary_tables(db=None):
     """Rebuild the small summary tables used by the dashboard."""
@@ -152,23 +228,36 @@ def refresh_dashboard_summary_tables(db=None):
         db.execute(CONTRIBUTOR_FIRST_APPEARANCE_REFRESH_SQL)
         db.execute("DELETE FROM dashboard_affiliation_first_appearance_by_date")
         db.execute(AFFILIATION_FIRST_APPEARANCE_REFRESH_SQL)
+        db.execute("DELETE FROM dashboard_contributors_on_preprints_by_date")
+        db.execute(CONTRIBUTORS_ON_PREPRINTS_REFRESH_SQL)
+        db.execute("DELETE FROM dashboard_top_contributors")
+        db.execute(TOP_CONTRIBUTORS_REFRESH_SQL)
+        db.execute("DELETE FROM dashboard_affiliations_on_preprints_by_date")
+        db.execute(AFFILIATIONS_ON_PREPRINTS_REFRESH_SQL)
 
-    contributor_rows = db.execute(
-        "SELECT COUNT(*) FROM dashboard_contributor_first_appearance_by_date"
-    ).fetchone()[0]
-    affiliation_rows = db.execute(
-        "SELECT COUNT(*) FROM dashboard_affiliation_first_appearance_by_date"
-    ).fetchone()[0]
+    summary_counts = {
+        "dashboard_contributor_first_appearance_by_date": db.execute(
+            "SELECT COUNT(*) FROM dashboard_contributor_first_appearance_by_date"
+        ).fetchone()[0],
+        "dashboard_affiliation_first_appearance_by_date": db.execute(
+            "SELECT COUNT(*) FROM dashboard_affiliation_first_appearance_by_date"
+        ).fetchone()[0],
+        "dashboard_contributors_on_preprints_by_date": db.execute(
+            "SELECT COUNT(*) FROM dashboard_contributors_on_preprints_by_date"
+        ).fetchone()[0],
+        "dashboard_top_contributors": db.execute(
+            "SELECT COUNT(*) FROM dashboard_top_contributors"
+        ).fetchone()[0],
+        "dashboard_affiliations_on_preprints_by_date": db.execute(
+            "SELECT COUNT(*) FROM dashboard_affiliations_on_preprints_by_date"
+        ).fetchone()[0],
+    }
     logger.info(
-        "Refreshed dashboard summary tables: %s contributor dates, %s affiliation dates",
-        contributor_rows,
-        affiliation_rows,
+        "Refreshed dashboard summary tables: %s",
+        ", ".join(f"{table_name}={row_count}" for table_name, row_count in summary_counts.items()),
     )
 
-    return {
-        "dashboard_contributor_first_appearance_by_date": contributor_rows,
-        "dashboard_affiliation_first_appearance_by_date": affiliation_rows,
-    }
+    return summary_counts
 
 
 def init_db(db=None):
