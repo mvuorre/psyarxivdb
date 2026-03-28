@@ -46,7 +46,7 @@ make daily-update
 make help
 ```
 
-To rebuild the small precomputed tables used by the dashboard without doing a full ingest, run:
+To rebuild the small precomputed tables used by the dashboard without doing a full ingest, including the precomputed `coauthor_edges` table, run:
 
 ```bash
 make refresh-dashboard-summaries

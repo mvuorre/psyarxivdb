@@ -94,6 +94,23 @@ WHERE c.full_name IS NOT NULL
   AND counts.n_preprints > 0
 """
 
+COAUTHOR_EDGES_REFRESH_SQL = """
+INSERT INTO coauthor_edges (source_osf_user_id, target_osf_user_id, shared_preprint_count)
+SELECT
+    pc1.osf_user_id AS source_osf_user_id,
+    pc2.osf_user_id AS target_osf_user_id,
+    COUNT(DISTINCT pc1.preprint_id) AS shared_preprint_count
+FROM preprint_contributors AS pc1
+JOIN preprint_contributors AS pc2
+    ON pc1.preprint_id = pc2.preprint_id
+   AND pc1.osf_user_id < pc2.osf_user_id
+WHERE pc1.bibliographic = 1
+  AND pc2.bibliographic = 1
+  AND pc1.is_latest_version = 1
+  AND pc2.is_latest_version = 1
+GROUP BY pc1.osf_user_id, pc2.osf_user_id
+"""
+
 AFFILIATIONS_ON_PREPRINTS_REFRESH_SQL = """
 INSERT INTO dashboard_affiliations_on_preprints_by_date (date, count)
 SELECT
@@ -475,6 +492,21 @@ def ensure_dashboard_query_support(db):
         }, pk="id")
         logger.info("Created dashboard_subject_counts table")
 
+    if "coauthor_edges" not in db.table_names():
+        db["coauthor_edges"].create({
+            "source_osf_user_id": str,
+            "target_osf_user_id": str,
+            "shared_preprint_count": int,
+        }, pk=["source_osf_user_id", "target_osf_user_id"])
+        logger.info("Created coauthor_edges table")
+
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_coauthor_edges_target_user
+        ON coauthor_edges (target_osf_user_id)
+        """
+    )
+
 
 def refresh_dashboard_summary_tables(db=None):
     """Rebuild the small summary tables used by the dashboard."""
@@ -498,6 +530,8 @@ def refresh_dashboard_summary_tables(db=None):
         db.execute(AFFILIATIONS_ON_PREPRINTS_REFRESH_SQL)
         db.execute("DELETE FROM dashboard_subject_counts")
         db.execute(SUBJECT_COUNTS_REFRESH_SQL)
+        db.execute("DELETE FROM coauthor_edges")
+        db.execute(COAUTHOR_EDGES_REFRESH_SQL)
 
     summary_counts = {
         "dashboard_contributor_first_appearance_by_date": db.execute(
@@ -517,6 +551,9 @@ def refresh_dashboard_summary_tables(db=None):
         ).fetchone()[0],
         "dashboard_subject_counts": db.execute(
             "SELECT COUNT(*) FROM dashboard_subject_counts"
+        ).fetchone()[0],
+        "coauthor_edges": db.execute(
+            "SELECT COUNT(*) FROM coauthor_edges"
         ).fetchone()[0],
     }
     logger.info(
